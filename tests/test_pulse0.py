@@ -727,3 +727,28 @@ def test_ui_rail_expands_on_hover_or_keyboard_only_and_has_mobile_bar():
     css = _static("app.css")
     assert "focus-within" not in css  # a clicked link must not keep the rail expanded
     assert "#rail:has(a:focus-visible)" in css and "padding-bottom:52px" in css  # bottom nav bar on phones
+
+
+# ---------- query correctness (kept last: these add data other tests would otherwise see)
+@pytest.mark.anyio
+async def test_service_percentiles_match_sorted_index_method():
+    spans = [_span(_tid(), _sid(), "", "GET /p", 2, float(i)) for i in range(1, 101)]
+    body = {"resourceSpans": [{"resource": _resource("pct-svc"), "scopeSpans": [{"spans": spans}]}]}
+    assert (await client.post("/v1/traces", json=body)).status_code == 200
+    row = next(r for r in (await client.get("/api/services")).json() if r["service"] == "pct-svc")
+    d = [float(i) for i in range(1, 101)]
+    assert (row["p50"], row["p95"], row["p99"]) == (d[50], d[95], d[99])  # old list-index definition
+    assert row["n"] == 100
+
+
+@pytest.mark.anyio
+async def test_traces_listing_is_newest_first_and_limited():
+    for _ in range(3):
+        t = _tid()
+        body = {"resourceSpans": [{"resource": _resource("list-svc"), "scopeSpans": [{"spans": [
+            _span(t, _sid(), "", "GET /l", 2, 5.0, error=True)]}]}]}
+        await client.post("/v1/traces", json=body)
+    rows = (await client.get("/api/traces", params={"service": "list-svc", "limit": 2})).json()
+    assert len(rows) == 2 and rows[0]["start_ns"] >= rows[1]["start_ns"]
+    errs = (await client.get("/api/traces", params={"service": "list-svc", "errors": "true"})).json()
+    assert len(errs) == 3 and all(r["errors"] >= 1 for r in errs)

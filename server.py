@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import Optional, Literal
@@ -113,7 +114,41 @@ def db():
         conn.commit()
 
 
+_readers = threading.local()
+
+
+def _reader():
+    """Per-thread read connection to the default DB. WAL lets readers run alongside the single writer,
+    so slow dashboard queries no longer queue behind (or block) ingest on the global lock."""
+    c = getattr(_readers, "c", None)
+    if c is None or getattr(_readers, "path", None) != DB_PATH:
+        c = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=5)
+        c.row_factory = sqlite3.Row
+        _readers.c, _readers.path = c, DB_PATH
+    return c
+
+
+def qrows(sql, args=()):
+    """Raw row tuples (no dict conversion) for large scans aggregated by the caller."""
+    if _cur_db.get() is None:
+        return _reader().execute(sql, args).fetchall()
+    conn, lock = _handle()
+    with lock:
+        return conn.execute(sql, args).fetchall()
+
+
+def qcol(sql, args=()):
+    """First column of every row as a plain list (no per-row dicts: much cheaper for big scans)."""
+    if _cur_db.get() is None:
+        return [r[0] for r in _reader().execute(sql, args)]
+    conn, lock = _handle()
+    with lock:
+        return [r[0] for r in conn.execute(sql, args)]
+
+
 def q(sql, args=()):
+    if _cur_db.get() is None and sql.lstrip().upper().startswith(("SELECT", "WITH")):
+        return [dict(r) for r in _reader().execute(sql, args).fetchall()]
     conn, lock = _handle()
     with lock:
         return [dict(r) for r in conn.execute(sql, args).fetchall()]
@@ -381,7 +416,7 @@ async def _otlp(request: Request, name, mod, fn):
             d = _body_json(raw, ctype, getattr(p, name))
         else:
             d = json.loads(raw or b"{}")
-        n = fn(d)
+        n = await run_in_threadpool(fn, d)  # JSON decode + SQLite insert must not block the event loop
     except Exception as e:
         raise HTTPException(400, f"bad OTLP payload: {e}")
     if HOSTED:
@@ -405,16 +440,16 @@ async def v1_metrics(r: Request):
 
 
 @app.get("/healthz")
-def healthz():
+async def healthz():
     """Liveness: process is up and serving."""
     return {"status": "ok"}
 
 
 @app.get("/readyz")
-def readyz():
-    """Readiness: database is reachable and writable."""
+async def readyz():
+    """Readiness: database is reachable. A busy writer is not "not ready"."""
     try:
-        q("SELECT 1")
+        await run_in_threadpool(q, "SELECT 1")
         return {"status": "ready", "retention_hours": RETENTION_HOURS}
     except Exception as e:
         raise HTTPException(503, f"not ready: {e}")
@@ -443,14 +478,19 @@ def since_ns(minutes):
 @app.get("/api/services")
 def services(minutes: float = 60):
     t0 = since_ns(minutes)
-    rows = q("""SELECT service, COUNT(*) n, SUM(status=2) err, AVG(dur_ms) avg_ms, MAX(dur_ms) max_ms
-                FROM spans WHERE start_ns>=? AND (parent_id='' OR kind=2) GROUP BY service ORDER BY n DESC""", (t0,))
+    # One scan: counts, errors, avg/max and percentiles per service, aggregated in Python from plain tuples.
+    per = {}
+    for svc, st, dur in qrows("SELECT service, status, dur_ms FROM spans WHERE start_ns>=? AND (parent_id='' OR kind=2)", (t0,)):
+        a = per.get(svc)
+        if a is None:
+            a = per[svc] = [0, 0, 0.0, 0.0, []]
+        a[0] += 1; a[1] += st == 2; a[2] += dur; a[3] = max(a[3], dur); a[4].append(dur)
+    rows = []
+    for svc, (n, err, tot, mx, d) in sorted(per.items(), key=lambda kv: -kv[1][0]):
+        d.sort()
+        rows.append(dict(service=svc, n=n, err=err, avg_ms=tot / n, max_ms=mx,
+                         p50=d[int(n * .5)], p95=d[min(n - 1, int(n * .95))], p99=d[min(n - 1, int(n * .99))]))
     for r in rows:
-        d = [x["dur_ms"] for x in q("SELECT dur_ms FROM spans WHERE service=? AND start_ns>=? AND (parent_id='' OR kind=2) ORDER BY dur_ms",
-                                    (r["service"], t0))]
-        r["p50"] = d[int(len(d) * .5)] if d else 0
-        r["p95"] = d[min(len(d) - 1, int(len(d) * .95))] if d else 0
-        r["p99"] = d[min(len(d) - 1, int(len(d) * .99))] if d else 0
         r["rate"] = r["n"] / (minutes * 60)
         r["err_pct"] = 100 * (r["err"] or 0) / r["n"] if r["n"] else 0
         r["err"] = r["err"] or 0
@@ -554,7 +594,11 @@ def traces(minutes: float = 60, service: str = "", errors: bool = False, min_ms:
         where.append("service=?"); args.append(service)
     if q_:
         where.append("(name LIKE ? OR attrs LIKE ? OR trace_id LIKE ?)"); args += [f"%{q_}%"] * 3
-    sub = f"SELECT DISTINCT trace_id FROM spans WHERE {' AND '.join(where)}"
+    # Candidate traces = those with a span among the newest spans in the window (index scan on start_ns),
+    # so listing 50 traces does not aggregate every trace in the window.
+    cap = max(limit * 50, 5000)
+    cand = list(where) + (["status=2"] if errors else [])
+    sub = f"SELECT DISTINCT trace_id FROM (SELECT trace_id FROM spans WHERE {' AND '.join(cand)} ORDER BY start_ns DESC LIMIT {int(cap)})"
     having = []
     if errors:
         having.append("SUM(status=2)>0")
