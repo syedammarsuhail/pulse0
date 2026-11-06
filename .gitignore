@@ -8,3 +8,5 @@ e2e-run*.log
 pulse0.tar.gz
 *.zip
 .env
+test-apps/shop/k8s/shop.yaml
+shop-build.log

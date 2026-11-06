@@ -12,7 +12,7 @@ The repo root also holds `pulse0.tar.gz` (the original archive, already extracte
 
 ```bash
 pip install -r requirements.txt pytest pytest-anyio httpx
-python -m pytest tests/ -q                       # 89 tests; in-process via httpx.ASGITransport, no port needed
+python -m pytest tests/ -q                       # 119 tests; in-process via httpx.ASGITransport, no port needed
 python -m pytest tests/test_hosted.py -q         # hosted/multi-tenant suite
 python -m pytest tests/ -k <name> -xvs           # single test
 node tests/test_mapkit.js                        # service-map layout engine tests (no deps)
@@ -42,4 +42,5 @@ Env: `PULSE0_PORT`, `PULSE0_DB`, `PULSE0_RETENTION_HOURS`, `PULSE0_TOKEN` (beare
 - Verified on a live EKS cluster (Nov 2026): cluster-collector Deployment, hosted-mode tenant isolation, filelog fix. The log-name fallback is only covered by a unit test, not yet deployed. The Claude assistant has not been tried with a real key (user supplies it).
 - Performance (load-tested on EKS, 2x2-vCPU nodes, pod limit 1 CPU/1Gi): ingest tops out around 1.5-2.5k spans/s (CPU-bound Python); with ~1M spans in the 1h window `/api/services` takes ~4s, `/api/map` ~7s and `/api/home` ~10s even idle, since they scan the whole window (rollup tables would be the real fix). Never run ingest decode/insert on the event loop (`run_in_threadpool`); keep `/healthz` and `/readyz` async and off the DB lock, and keep generous probe timeouts, or kubelet kills a busy-but-healthy pod. Default-DB `SELECT`s go through per-thread reader connections (WAL), hosted tenant DBs still use the per-DB lock.
 - Heavy aggregates (`services`, `service_map`, `insights`, `home`) are wrapped in `ttl_cached` (single-flight, `PULSE0_CACHE_TTL` seconds, default 20; tests set it to 0) and a self-hosted-only warmer thread refreshes the 15m/60m windows while the UI was used in the last 5 minutes. The first request after the instance has been idle still pays the full cost (~20s at 1M spans); the UI shows 'Loading…' meanwhile. Redeploying with an unchanged image tag needs `imagePullPolicy: Always`, or nodes reuse the cached image.
+- SSO/RBAC (self-hosted only): `auth` middleware in `server.py` resolves identity (`PULSE0_TOKEN` = admin, `PULSE0_READ_TOKEN` = viewer, signed `p0_session` cookie from the OIDC login in `/auth/login` + `/auth/callback`, else open access when nothing is configured) and enforces viewer < editor < admin via `_required_role`; mutating calls are written to the `audit` table. `/v1/*` ingest only accepts `PULSE0_TOKEN`/`PULSE0_INGEST_TOKEN`. `/api/mode` must stay byte-identical in self-hosted (a test pins it); SSO info lives in `/api/auth/config`. `_idp_request` is the single outbound IdP call, patched by `tests/test_sso.py`; `python tests/fake_idp.py` is a local fake provider. See `SSO-RBAC.md`.
 - `eks-e2e-aws.ps1` must call `System32\tar.exe` by full path; run from Git Bash, plain `tar` is GNU tar and produces a bad zip.

@@ -226,6 +226,8 @@
     async render(page) {
       const stats = await api("/stats").catch(() => null);
       const ai = await api("/assistant/status").catch(() => null); if (ai) P.aiStatus = ai;
+      const me = await api("/me").catch(() => null);
+      const audit = me && me.role === "admin" ? await api("/audit?limit=50").catch(() => null) : null;
       const tok = el("input", { type: "password", value: store.get("token", ""), placeholder: "Bearer token (only if PULSE0_TOKEN is set)", style: "width:min(420px,100%)" });
       const theme = el("select", { on: { change: e => { document.documentElement.dataset.theme = e.target.value; store.set("theme", e.target.value); } } }, opt("dark", "Dark", document.documentElement.dataset.theme !== "light"), opt("light", "Light", document.documentElement.dataset.theme === "light"));
       const rng = el("select", { on: { change: e => P.setRange(+e.target.value) } }, ...[5, 15, 30, 60, 180, 360, 720, 1440, 4320, 10080].map(m => opt(m, P.rangeLabel(m), m === M())));
@@ -239,6 +241,10 @@
             codeBlock(["kubectl -n observability create secret generic pulse0-anthropic --from-literal=api-key=<YOUR_ANTHROPIC_API_KEY>", "helm upgrade pulse0 ./helm/pulse0 -n observability --reuse-values --set ai.enabled=true --set ai.existingSecret=pulse0-anthropic --set ai.secretKey=api-key", "kubectl -n observability rollout restart statefulset/pulse0"].join("\n")),
             el("div", { class: "muted", style: "font-size:12px" }, "Docker / local process:"),
             codeBlock("ANTHROPIC_API_KEY=<YOUR_ANTHROPIC_API_KEY> python server.py   # optional: PULSE0_AI_MODEL=claude-sonnet-5-5"))),
+          me && me.role ? panel("Identity & access", el("div", { class: "col" },
+            el("div", { class: "kv", style: "margin:-12px -14px" }, ...[["Signed in as", me.name ? `${me.name} (${me.actor})` : me.actor], ["Role", me.role], ["Via", me.via === "session" ? "Single sign-on" : me.via === "token" ? "API token" : "Open access (no auth configured)"]].flatMap(([k, v]) => [el("div", {}, k), el("div", {}, v)])),
+            el("div", { class: "muted", style: "font-size:12px;padding-top:8px" }, "Viewers can read everything. Editors can also create and change dashboards, alerts, SLOs and synthetic checks. Admins can also read the audit log."))) : null,
+          audit ? panel("Audit log", audit.length ? el("div", { style: "max-height:320px;overflow:auto;margin:-12px -14px" }, el("table", { style: "width:100%;border-collapse:collapse;font-size:12px" }, el("tbody", {}, ...audit.map(a => el("tr", { style: "border-bottom:1px solid var(--line)" }, el("td", { class: "muted", style: "padding:6px 10px;white-space:nowrap" }, new Date(a.ts / 1e6).toLocaleString()), el("td", { style: "padding:6px 8px" }, a.actor), el("td", { class: "mono", style: "padding:6px 8px" }, a.method + " " + a.path), el("td", { style: "padding:6px 10px;text-align:right" }, String(a.status))))))) : el("div", { class: "muted" }, "Nothing recorded yet. Changes and sign-ins appear here.")) : null,
           panel("Display", el("div", { class: "col" }, field("Theme", theme), field("Default time range", rng))),
           panel("This Pulse0", stats ? el("div", { class: "kv", style: "margin:-12px -14px" }, ...[["Spans stored", stats.spans.toLocaleString()], ["Log records", stats.logs.toLocaleString()], ["Metric points", stats.metrics.toLocaleString()], ["Services", stats.services], ["Alert rules", stats.alert_rules], ["Synthetic checks", stats.synthetics], ["Retention", stats.retention_hours + " hours"], ["Database", stats.db_path]].flatMap(([k, v]) => [el("div", {}, k), el("div", { class: "mono" }, String(v))])) : empty("Stats unavailable"))));
     },

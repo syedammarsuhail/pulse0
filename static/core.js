@@ -249,7 +249,15 @@
   function closeDrawerSoft() { if (P.drawerOpen === "drawer" && !parseHash().q.get("id")) closeDrawer(); }
   function authCard() {
     const inp = el("input", { type: "password", placeholder: "Bearer token", style: "width:320px" });
-    return el("div", { class: "panel", style: "max-width:520px;margin:60px auto;" }, el("div", { class: "ph" }, "API token required"), el("div", { class: "pb", style: "display:flex;flex-direction:column;gap:12px" }, el("div", { class: "muted" }, P.mode === "hosted" ? "This is a Pulse-hosted workspace. Paste a read or admin API key for your project; it is stored only in this browser." : "This Pulse0 instance has PULSE0_TOKEN set. Enter it once; it is stored only in this browser."), inp, el("div", {}, el("button", { class: "btn primary", on: { click: () => { store.set("token", inp.value.trim()); render(); } } }, "Unlock"))));
+    const sso = el("div", { style: "display:none;flex-direction:column;gap:8px" });
+    fetch("/api/auth/config").then(r => r.json()).then(c => {
+      if (!c.sso || !c.sso.enabled) return;
+      sso.style.display = "flex";
+      sso.append(el("a", { class: "btn primary", href: c.sso.login_url + "?next=" + encodeURIComponent(location.pathname + location.hash), style: "justify-content:center;text-decoration:none" }, "Sign in with " + c.sso.provider));
+      if (c.token_required) sso.append(el("div", { class: "muted", style: "text-align:center;font-size:12px" }, "or use an API token below"));
+      if (!c.token_required) inp.parentElement.style.display = "none";
+    }).catch(() => {});
+    return el("div", { class: "panel", style: "max-width:520px;margin:60px auto;" }, el("div", { class: "ph" }, "Sign in"), el("div", { class: "pb", style: "padding-bottom:0" }, sso), el("div", { class: "pb", style: "display:flex;flex-direction:column;gap:12px" }, el("div", { class: "muted" }, P.mode === "hosted" ? "This is a Pulse-hosted workspace. Paste a read or admin API key for your project; it is stored only in this browser." : "This Pulse0 instance has PULSE0_TOKEN set. Enter it once; it is stored only in this browser."), inp, el("div", {}, el("button", { class: "btn primary", on: { click: () => { store.set("token", inp.value.trim()); render(); } } }, "Unlock"))));
   }
   function renderCrumbs(list, view) {
     const c = $("#crumbs"); c.replaceChildren();
@@ -276,6 +284,16 @@
   function highlightRail(path) { document.querySelectorAll("#rail a").forEach(a => a.classList.toggle("on", path === a.dataset.path || path.startsWith(a.dataset.path + "/"))); }
 
   // ---------------------------------------------------------------- status + badge
+  async function loadMe() {
+    const b = $("#whoami"); if (!b) return;
+    try {
+      const me = await api("/me"); P.me = me; document.body.dataset.role = me.role || "";
+      if (!me.role || me.via === "open") { b.hidden = true; return; }
+      b.hidden = false; b.replaceChildren(el("span", {}, me.name || me.actor), el("span", { class: "pill", style: "margin-left:8px" }, me.role));
+      b.title = me.via === "session" ? `Signed in as ${me.actor} - click to sign out` : `Using an API token (${me.role})`;
+      b.onclick = me.via !== "session" ? null : async () => { await fetch("/auth/logout", { method: "POST" }).catch(() => {}); location.reload(); };
+    } catch { b.hidden = true; }
+  }
   async function ping() {
     try {
       const [, ins] = await Promise.all([api("/stats"), api("/insights?minutes=" + S.minutes)]);
@@ -384,7 +402,7 @@
       else if (e.key === "/" && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName) && $("#palette").hidden) { e.preventDefault(); openPalette(); }
     });
     window.addEventListener("hashchange", () => render());
-    tick(); render();
+    tick(); render(); loadMe();
   };
   P.toggleTheme = toggleTheme; P.tick = tick; P.setRange = setRange;
 })();

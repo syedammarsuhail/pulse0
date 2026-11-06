@@ -30,13 +30,13 @@ Everything above lives inside your cluster. Pulse0 makes no outbound calls on it
 Supported by the code:
 - Telemetry is stored on a volume you own when self-hosted.
 - No outbound traffic unless you enable the assistant or configure webhooks/synthetics.
-- Bearer-token auth on `/v1/*` and `/api/*` (`auth.token` in the chart).
+- Bearer-token auth on `/v1/*` and `/api/*` (`auth.token` in the chart), optional OIDC single sign-on with roles and an audit log.
 
 Not implemented yet, so do not promise them:
-- SSO / SAML / OIDC login and role-based access control inside the UI.
+- SAML and SCIM provisioning (OIDC single sign-on and viewer/editor/admin roles exist: see `SSO-RBAC.md`, tested against a fake provider only).
 - Encryption at rest beyond what your storage class provides.
 - High availability: Pulse0 is a single-replica SQLite StatefulSet.
-- Audit logging of UI actions.
+- Tamper-proof or externally shipped audit logs (changes and sign-ins are recorded in the local database).
 - A third-party security audit or compliance certification.
 
 ## Security checklist before exposing it

@@ -4,13 +4,13 @@ Ingests OTLP (HTTP, JSON or protobuf) for traces, logs and metrics, stores them 
 SQLite, and serves a resource-centric UI: services (RED metrics), service map,
 trace waterfall, log search, metric explorer, alert rules and synthetic checks.
 """
-import json, os, sqlite3, threading, time, ssl, socket, urllib.request, urllib.error
+import json, os, sqlite3, threading, time, ssl, socket, urllib.request, urllib.error, urllib.parse, base64
 import collections, contextvars, hashlib, hmac, ipaddress, re, secrets
 from contextlib import contextmanager
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS synthetic_runs(
 CREATE INDEX IF NOT EXISTS ix_synth ON synthetic_runs(check_id, ts);
 CREATE TABLE IF NOT EXISTS dashboards(
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, panels TEXT, updated INTEGER);
+CREATE TABLE IF NOT EXISTS audit(
+  ts INTEGER, actor TEXT, role TEXT, via TEXT, method TEXT, path TEXT, status INTEGER, detail TEXT);
+CREATE INDEX IF NOT EXISTS ix_audit ON audit(ts);
 CREATE TABLE IF NOT EXISTS slos(
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, service TEXT,
   objective_pct REAL, latency_ms REAL, window_days INTEGER DEFAULT 30);
@@ -430,14 +433,158 @@ app.add_middleware(CORSMiddleware, allow_origin_regex=".*", allow_credentials=Tr
                    allow_methods=["*"], allow_headers=["*"], expose_headers=["*"])
 
 
+# ---------------------------------------------------------------- SSO (OIDC) + RBAC (self-hosted)
+# Identity sources, checked in order: bearer PULSE0_TOKEN (admin, unchanged), optional PULSE0_READ_TOKEN (viewer), a signed
+# session cookie issued after an OpenID Connect login, and - only when none of those is configured - open access (as before).
+# Roles: viewer (read) < editor (create/change dashboards, alerts, SLOs, synthetics) < admin (also the audit log).
+# /v1/* ingest is never session-authenticated: it needs PULSE0_TOKEN or PULSE0_INGEST_TOKEN when either is set.
+ROLE_RANK = {"viewer": 1, "editor": 2, "admin": 3}
+_SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def _csv(name):
+    return [x.strip() for x in os.environ.get(name, "").split(",") if x.strip()]
+
+
+def _load_oidc():
+    cfg = dict(
+        issuer=os.environ.get("PULSE0_OIDC_ISSUER", "").strip().rstrip("/"),
+        client_id=os.environ.get("PULSE0_OIDC_CLIENT_ID", "").strip(),
+        client_secret=os.environ.get("PULSE0_OIDC_CLIENT_SECRET", ""),
+        scopes=os.environ.get("PULSE0_OIDC_SCOPES", "openid email profile"),
+        role_claim=os.environ.get("PULSE0_OIDC_ROLE_CLAIM", "groups").strip(),
+        admin_groups=_csv("PULSE0_OIDC_ADMIN_GROUPS"), editor_groups=_csv("PULSE0_OIDC_EDITOR_GROUPS"),
+        viewer_groups=_csv("PULSE0_OIDC_VIEWER_GROUPS"),
+        default_role=os.environ.get("PULSE0_OIDC_DEFAULT_ROLE", "viewer").strip().lower(),
+        allowed_domains=[d.lower().lstrip("@") for d in _csv("PULSE0_OIDC_ALLOWED_DOMAINS")],
+        redirect_url=os.environ.get("PULSE0_OIDC_REDIRECT_URL", "").strip(),
+        session_ttl_h=float(os.environ.get("PULSE0_SESSION_TTL_HOURS", "12")),
+        provider_name=os.environ.get("PULSE0_OIDC_PROVIDER_NAME", "SSO").strip() or "SSO",
+    )
+    if cfg["default_role"] not in ROLE_RANK and cfg["default_role"] not in ("", "none", "deny"):
+        raise RuntimeError("PULSE0_OIDC_DEFAULT_ROLE must be viewer, editor, admin or none")
+    if cfg["default_role"] in ("none", "deny"):
+        cfg["default_role"] = ""
+    return cfg
+
+
+OIDC = _load_oidc()
+READ_TOKEN = os.environ.get("PULSE0_READ_TOKEN", "")
+INGEST_TOKEN = os.environ.get("PULSE0_INGEST_TOKEN", "")
+AUDIT_DAYS = float(os.environ.get("PULSE0_AUDIT_RETENTION_DAYS", "90"))
+_SESSION_SECRET = (os.environ.get("PULSE0_SESSION_SECRET") or secrets.token_hex(32)).encode()
+
+
+def sso_enabled():
+    return not HOSTED and bool(OIDC["issuer"] and OIDC["client_id"])
+
+
+if sso_enabled():
+    if not os.environ.get("PULSE0_SESSION_SECRET"):
+        print("warning: PULSE0_SESSION_SECRET is not set; SSO sessions will not survive a restart or span replicas")
+    if not (AUTH_TOKEN or INGEST_TOKEN):
+        print("warning: SSO is on but /v1/* ingest has no token; set PULSE0_TOKEN or PULSE0_INGEST_TOKEN")
+
+
+def _b64(b):
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+
+def _unb64(x):
+    return base64.urlsafe_b64decode(x + "=" * (-len(x) % 4))
+
+
+def _sign(payload):
+    body = _b64(json.dumps(payload, separators=(",", ":")).encode())
+    return body + "." + _b64(hmac.new(_SESSION_SECRET, body.encode(), hashlib.sha256).digest())
+
+
+def _unsign(tok):
+    """Verify an HMAC-signed cookie value and return its payload, or None if forged, malformed or expired."""
+    try:
+        body, sig = (tok or "").split(".", 1)
+        good = _b64(hmac.new(_SESSION_SECRET, body.encode(), hashlib.sha256).digest())
+        if not hmac.compare_digest(sig, good):
+            return None
+        d = json.loads(_unb64(body))
+        return d if d.get("exp", 0) > time.time() else None
+    except Exception:
+        return None
+
+
+def _required_role(method, path):
+    if path == "/api/audit" or path.startswith("/api/audit/"):
+        return "admin"
+    if method in _SAFE_METHODS or path in _READ_ONLY_POSTS:
+        return "viewer"
+    return "editor"
+
+
+def _tok_eq(given, want):
+    return bool(want) and hmac.compare_digest(given.encode(), want.encode())
+
+
+def _bearer(request):
+    h = request.headers.get("authorization", "")
+    return h[7:] if h.startswith("Bearer ") else ""
+
+
+def _identify(request):
+    t = _bearer(request)
+    if t:
+        if _tok_eq(t, AUTH_TOKEN):
+            return dict(actor="api-token", role="admin", via="token")
+        if _tok_eq(t, READ_TOKEN):
+            return dict(actor="read-token", role="viewer", via="token")
+    if sso_enabled():
+        sess = _unsign(request.cookies.get("p0_session", ""))
+        if sess and sess.get("role") in ROLE_RANK:
+            return dict(actor=sess.get("email") or sess.get("sub", "?"), name=sess.get("name", ""), role=sess["role"], via="session")
+    if not (AUTH_TOKEN or READ_TOKEN or sso_enabled()):
+        return dict(actor="anonymous", role="admin", via="open")
+    return None
+
+
+def _audit(ident, method, path, status, detail=""):
+    try:
+        with db() as c:
+            c.execute("INSERT INTO audit VALUES(?,?,?,?,?,?,?,?)",
+                      (time.time_ns(), ident["actor"], ident["role"], ident["via"], method, path, int(status), detail[:300]))
+    except Exception as e:
+        print("audit error:", e)
+
+
+_PUBLIC_API = ("/api/mode", "/api/auth/config")
+
+
 @app.middleware("http")
 async def auth(request: Request, call_next):
     if HOSTED:
         return await _hosted_auth(request, call_next)
-    if AUTH_TOKEN and (request.url.path.startswith("/v1/") or request.url.path.startswith("/api/")):
-        if request.headers.get("authorization", "") != f"Bearer {AUTH_TOKEN}":
+    path, method = request.url.path, request.method
+    if path.startswith("/v1/"):
+        allowed = [t for t in (AUTH_TOKEN, INGEST_TOKEN) if t]
+        if allowed and not any(_tok_eq(_bearer(request), t) for t in allowed):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-    return await call_next(request)
+        return await call_next(request)
+    if not path.startswith("/api/") or path in _PUBLIC_API or method == "OPTIONS":
+        return await call_next(request)
+    ident = _identify(request)
+    if ident is None:
+        return JSONResponse({"error": "unauthorized", "sso": sso_enabled()}, status_code=401)
+    need = _required_role(method, path)
+    if ROLE_RANK[ident["role"]] < ROLE_RANK[need]:
+        return JSONResponse({"error": "forbidden", "message": f"this action requires the {need} role (you are {ident['role']})",
+                             "status": 403}, status_code=403)
+    if ident["via"] == "session" and method not in _SAFE_METHODS:
+        origin = request.headers.get("origin")  # cookie-authenticated writes must come from this site (CSRF)
+        if origin and urllib.parse.urlparse(origin).netloc != request.headers.get("host", ""):
+            return JSONResponse({"error": "forbidden", "message": "cross-origin request refused", "status": 403}, status_code=403)
+    request.state.who = ident
+    resp = await call_next(request)
+    if method not in _SAFE_METHODS:
+        await run_in_threadpool(_audit, ident, method, path, resp.status_code)
+    return resp
 
 
 @app.middleware("http")
@@ -1671,7 +1818,7 @@ async def _hosted_auth(request: Request, call_next):
         if not _admin_ok(request):
             return _auth_fail(request)
         return await call_next(request)
-    if path == "/api/mode" or not (path.startswith("/v1/") or path.startswith("/api/") or path.startswith("/org/")):
+    if path in ("/api/mode", "/api/auth/config") or not (path.startswith("/v1/") or path.startswith("/api/") or path.startswith("/org/")):
         return await call_next(request)
     ident = _verify_key(_extract_key(request))
     if not ident:
@@ -2028,6 +2175,179 @@ app.include_router(admin)
 app.include_router(org)
 
 
+_disc = {"at": 0.0, "doc": None}
+
+
+def _idp_request(url, form=None, headers=None):
+    """GET (or form-POST) JSON from the identity provider. Tests replace this with a fake IdP."""
+    data = urllib.parse.urlencode(form).encode() if form is not None else None
+    req = urllib.request.Request(url, data=data, headers={"Accept": "application/json", **(headers or {})})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
+
+
+def _discovery():
+    if _disc["doc"] and time.time() - _disc["at"] < 3600:
+        return _disc["doc"]
+    doc = _idp_request(OIDC["issuer"] + "/.well-known/openid-configuration")
+    if not doc.get("authorization_endpoint") or not doc.get("token_endpoint"):
+        raise HTTPException(502, "identity provider discovery document is missing endpoints")
+    _disc.update(at=time.time(), doc=doc)
+    return doc
+
+
+def _need_sso():
+    if not sso_enabled():
+        raise HTTPException(404, "SSO is not configured")
+
+
+def _redirect_uri(request):
+    return OIDC["redirect_url"] or str(request.base_url).rstrip("/") + "/auth/callback"
+
+
+def _secure_cookie(request):
+    return _redirect_uri(request).startswith("https://") or request.url.scheme == "https"
+
+
+def _safe_next(n):
+    n = n or "/"
+    return n if n.startswith("/") and not n.startswith("//") and "\\" not in n else "/"
+
+
+def _login_page(msg, status):
+    import html
+    return HTMLResponse(f"<!doctype html><meta charset=utf-8><title>Sign-in failed</title><body style='font:15px system-ui;"
+                        f"max-width:520px;margin:15vh auto;padding:0 16px'><h2>Sign-in failed</h2><p>{html.escape(msg)}</p>"
+                        f"<p><a href='/auth/login'>Try again</a></p></body>", status_code=status)
+
+
+def _claim_path(claims, path):
+    cur = claims
+    for part in path.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return None
+        cur = cur[part]
+    return cur
+
+
+def _role_claim_value(claims):
+    name = OIDC["role_claim"]
+    return claims[name] if name in claims else _claim_path(claims, name)  # also supports nested paths like realm_access.roles
+
+
+def _role_from_claims(claims):
+    v = _role_claim_value(claims)
+    vals = {x for x in re.split(r"[,\s]+", v) if x} if isinstance(v, str) else {str(x) for x in (v or [])}
+    for role, key in (("admin", "admin_groups"), ("editor", "editor_groups"), ("viewer", "viewer_groups")):
+        if vals & set(OIDC[key]):
+            return role
+    return OIDC["default_role"] or None
+
+
+@app.get("/auth/login")
+def auth_login(request: Request, next: str = "/"):
+    _need_sso()
+    disc = _discovery()
+    state, nonce, verifier = secrets.token_urlsafe(24), secrets.token_urlsafe(24), secrets.token_urlsafe(48)
+    params = {"response_type": "code", "client_id": OIDC["client_id"], "redirect_uri": _redirect_uri(request),
+              "scope": OIDC["scopes"], "state": state, "nonce": nonce,
+              "code_challenge": _b64(hashlib.sha256(verifier.encode()).digest()), "code_challenge_method": "S256"}
+    ep = disc["authorization_endpoint"]
+    resp = RedirectResponse(ep + ("&" if "?" in ep else "?") + urllib.parse.urlencode(params), status_code=302)
+    resp.set_cookie("p0_oidc", _sign({"s": state, "n": nonce, "v": verifier, "next": _safe_next(next), "exp": time.time() + 600}),
+                    max_age=600, httponly=True, samesite="lax", secure=_secure_cookie(request), path="/auth")
+    return resp
+
+
+@app.get("/auth/callback")
+def auth_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    _need_sso()
+    if error:
+        return _login_page(f"The identity provider returned an error: {error}", 400)
+    st = _unsign(request.cookies.get("p0_oidc", ""))
+    if not st or not code or not state or not hmac.compare_digest(str(st.get("s", "")), state):
+        return _login_page("The sign-in session expired or was tampered with. Please start again.", 400)
+    try:
+        disc = _discovery()
+        tok = _idp_request(disc["token_endpoint"], {
+            "grant_type": "authorization_code", "code": code, "redirect_uri": _redirect_uri(request),
+            "client_id": OIDC["client_id"], "client_secret": OIDC["client_secret"], "code_verifier": st["v"]})
+        claims = json.loads(_unb64(tok["id_token"].split(".")[1]))  # received over TLS straight from the issuer's token endpoint
+        if _role_claim_value(claims) is None and disc.get("userinfo_endpoint") and tok.get("access_token"):
+            claims = {**_idp_request(disc["userinfo_endpoint"], headers={"Authorization": "Bearer " + tok["access_token"]}), **claims}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("oidc callback error:", e)
+        return _login_page("Could not complete sign-in with the identity provider.", 502)
+    aud = claims.get("aud")
+    aud = aud if isinstance(aud, list) else [aud]
+    if str(claims.get("iss", "")).rstrip("/") != OIDC["issuer"]:
+        return _login_page("The identity token was issued by an unexpected issuer.", 403)
+    if OIDC["client_id"] not in aud:
+        return _login_page("The identity token was not issued for this application.", 403)
+    if float(claims.get("exp", 0)) < time.time() - 30:
+        return _login_page("The identity token has expired.", 403)
+    if not hmac.compare_digest(str(claims.get("nonce", "")), st["n"]):
+        return _login_page("The identity token does not match this sign-in attempt.", 403)
+    email = str(claims.get("email") or claims.get("preferred_username") or claims.get("sub") or "")
+    if not email:
+        return _login_page("The identity provider did not return an email or user name.", 403)
+    if claims.get("email_verified") is False:
+        return _login_page("Your email address is not verified with the identity provider.", 403)
+    if OIDC["allowed_domains"] and email.rsplit("@", 1)[-1].lower() not in OIDC["allowed_domains"]:
+        return _login_page("Your email domain is not allowed to sign in here.", 403)
+    role = _role_from_claims(claims)
+    if not role:
+        _audit(dict(actor=email, role="none", via="session"), "LOGIN", "/auth/callback", 403, "no role mapped")
+        return _login_page("Your account has no Pulse0 role. Ask an administrator to add you to a Pulse0 group.", 403)
+    ttl = OIDC["session_ttl_h"] * 3600
+    resp = RedirectResponse(_safe_next(st.get("next")), status_code=302)
+    resp.set_cookie("p0_session", _sign({"sub": str(claims.get("sub", "")), "email": email, "name": str(claims.get("name", "")),
+                                         "role": role, "exp": time.time() + ttl}),
+                    max_age=int(ttl), httponly=True, samesite="lax", secure=_secure_cookie(request), path="/")
+    resp.delete_cookie("p0_oidc", path="/auth")
+    _audit(dict(actor=email, role=role, via="session"), "LOGIN", "/auth/callback", 302)
+    return resp
+
+
+@app.post("/auth/logout")
+def auth_logout(request: Request):
+    origin = request.headers.get("origin")
+    if origin and urllib.parse.urlparse(origin).netloc != request.headers.get("host", ""):
+        raise HTTPException(403, "cross-origin request refused")
+    sess = _unsign(request.cookies.get("p0_session", ""))
+    if sess:
+        _audit(dict(actor=sess.get("email", "?"), role=sess.get("role", "?"), via="session"), "LOGOUT", "/auth/logout", 200)
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("p0_session", path="/")
+    return resp
+
+
+@app.get("/api/auth/config")
+def auth_config():
+    """Public: what the sign-in screen needs before anyone is authenticated."""
+    return {"sso": {"enabled": sso_enabled(), "provider": OIDC["provider_name"], "login_url": "/auth/login"},
+            "token_required": bool(AUTH_TOKEN or READ_TOKEN) or HOSTED}
+
+
+@app.get("/api/me")
+def api_me(request: Request):
+    who = getattr(request.state, "who", None)
+    if who:
+        return {k: who.get(k, "") for k in ("actor", "name", "role", "via")}
+    return {"actor": "hosted-key", "name": "", "role": None, "via": "hosted"}
+
+
+@app.get("/api/audit")
+def api_audit(limit: int = 200, actor: str = ""):
+    """Who changed what (admin role). Mutating API calls plus sign-ins/outs."""
+    where, args = ["1=1"], []
+    if actor:
+        where.append("actor=?"); args.append(actor)
+    return q(f"SELECT * FROM audit WHERE {' AND '.join(where)} ORDER BY ts DESC LIMIT ?", (*args, max(1, min(limit, 1000))))
+
+
 @app.get("/api/mode")
 def api_mode():
     """Which deployment mode this server runs in (public: the UI needs it before sign-in)."""
@@ -2064,6 +2384,7 @@ def worker_tick(state, now=None):
                 with db() as c:
                     c.execute("DELETE FROM spans WHERE start_ns<?", (cut,)); c.execute("DELETE FROM logs WHERE ts_ns<?", (cut,))
                     c.execute("DELETE FROM metrics WHERE ts_ns<?", (cut,))
+                    c.execute("DELETE FROM audit WHERE ts<?", (time.time_ns() - int(AUDIT_DAYS * 86400e9),))
                     c.execute("DELETE FROM synthetic_runs WHERE ts<?", (int(time.time() - retention * 3600),))
         except Exception as e:
             print("worker error:", e)

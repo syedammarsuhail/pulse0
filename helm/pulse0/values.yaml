@@ -30,6 +30,28 @@ auth:
   # Optional bearer token enforced on /v1/* and /api/*.
   # Leave empty to disable auth (dev/internal only).
   token: ""
+  # Optional separate token that may ONLY write telemetry (/v1/*). Recommended once SSO is on, so apps and
+  # collectors never hold an admin credential. When empty, PULSE0_TOKEN (auth.token) is also the ingest token.
+  ingestToken: ""
+  # Single sign-on with any OpenID Connect provider (Okta, Entra ID, Google, Keycloak, ADFS, Dex, ...), self-hosted mode only.
+  # Create a confidential client whose redirect URI is <redirectUrl>, then store its secrets in an existing Secret:
+  #   kubectl -n observability create secret generic pulse0-oidc \
+  #     --from-literal=clientSecret=<CLIENT_SECRET> --from-literal=sessionSecret=$(openssl rand -hex 32)
+  oidc:
+    enabled: false
+    issuer: ""                 # e.g. https://login.example.com/realms/acme  (must serve /.well-known/openid-configuration)
+    clientId: ""
+    existingSecret: ""         # Secret holding keys clientSecret and sessionSecret
+    redirectUrl: ""            # public URL ending in /auth/callback; set it whenever TLS is terminated before Pulse0
+    scopes: "openid email profile"
+    roleClaim: groups          # token claim holding the user's groups; dotted paths work (realm_access.roles)
+    adminGroups: []            # members get the admin role (highest match wins)
+    editorGroups: []
+    viewerGroups: []
+    defaultRole: viewer        # role for signed-in users in none of the groups above; "none" denies them
+    allowedDomains: []         # optional email-domain allow-list, e.g. [example.com]
+    sessionTtlHours: 12
+    providerName: SSO          # label on the sign-in button
 
 # Deployment mode.
 #   selfhosted (default): classic single-tenant Pulse0. One SQLite database on the PVC; your data stays in

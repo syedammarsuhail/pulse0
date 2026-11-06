@@ -61,6 +61,32 @@ spec:
                   name: {{ include "pulse0.fullname" . }}-auth
                   key: token
             {{- end }}
+            {{- if .Values.auth.ingestToken }}
+            - name: PULSE0_INGEST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pulse0.fullname" . }}-auth
+                  key: ingestToken
+            {{- end }}
+            {{- if and .Values.auth.oidc.enabled (eq .Values.mode "selfhosted") }}
+            {{- $o := .Values.auth.oidc }}
+            - { name: PULSE0_OIDC_ISSUER, value: {{ required "auth.oidc.issuer is required when auth.oidc.enabled" $o.issuer | quote }} }
+            - { name: PULSE0_OIDC_CLIENT_ID, value: {{ required "auth.oidc.clientId is required when auth.oidc.enabled" $o.clientId | quote }} }
+            - name: PULSE0_OIDC_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: {{ required "auth.oidc.existingSecret (with keys clientSecret and sessionSecret) is required when auth.oidc.enabled" $o.existingSecret }}, key: clientSecret } }
+            - name: PULSE0_SESSION_SECRET
+              valueFrom: { secretKeyRef: { name: {{ $o.existingSecret }}, key: sessionSecret } }
+            - { name: PULSE0_OIDC_SCOPES, value: {{ $o.scopes | quote }} }
+            - { name: PULSE0_OIDC_ROLE_CLAIM, value: {{ $o.roleClaim | quote }} }
+            - { name: PULSE0_OIDC_ADMIN_GROUPS, value: {{ join "," $o.adminGroups | quote }} }
+            - { name: PULSE0_OIDC_EDITOR_GROUPS, value: {{ join "," $o.editorGroups | quote }} }
+            - { name: PULSE0_OIDC_VIEWER_GROUPS, value: {{ join "," $o.viewerGroups | quote }} }
+            - { name: PULSE0_OIDC_DEFAULT_ROLE, value: {{ $o.defaultRole | quote }} }
+            - { name: PULSE0_OIDC_ALLOWED_DOMAINS, value: {{ join "," $o.allowedDomains | quote }} }
+            - { name: PULSE0_OIDC_REDIRECT_URL, value: {{ $o.redirectUrl | quote }} }
+            - { name: PULSE0_SESSION_TTL_HOURS, value: {{ $o.sessionTtlHours | quote }} }
+            - { name: PULSE0_OIDC_PROVIDER_NAME, value: {{ $o.providerName | quote }} }
+            {{- end }}
             {{- if .Values.ai.enabled }}
             # Claude-backed 'Ask Pulse0'. optional:true so the pod still starts (in rule-based mode)
             # if the secret has not been created yet; restart the pod after creating it.
