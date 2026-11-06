@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS logs(
   ts_ns INTEGER, service TEXT, severity INTEGER, sev_text TEXT, body TEXT,
   trace_id TEXT, span_id TEXT, attrs TEXT, res TEXT);
 CREATE INDEX IF NOT EXISTS ix_logs_time ON logs(ts_ns);
+CREATE INDEX IF NOT EXISTS ix_logs_err ON logs(ts_ns, service) WHERE severity>=17;
 CREATE TABLE IF NOT EXISTS metrics(
   ts_ns INTEGER, service TEXT, name TEXT, unit TEXT, mtype TEXT, value REAL, attrs TEXT, res TEXT);
 CREATE INDEX IF NOT EXISTS ix_metrics ON metrics(name, ts_ns);
@@ -649,6 +650,7 @@ async def readyz():
 
 
 @app.get("/api/stats")
+@ttl_cached
 def stats():
     """Operational stats for monitoring Pulse0 itself."""
     return {
@@ -1194,13 +1196,11 @@ def _pct(sorted_vals, p):
     return sorted_vals[min(len(sorted_vals) - 1, int(len(sorted_vals) * p))] if sorted_vals else 0.0
 
 
-def _win(svc, t0, t1):
-    rows = q("SELECT dur_ms, status FROM spans WHERE service=? AND start_ns>=? AND start_ns<? AND (parent_id='' OR kind=2)",
-             (svc, t0, t1))
-    d = sorted(r["dur_ms"] for r in rows)
+def _agg(rows):
+    """{n, err, err_pct, p95} for (status, dur_ms) tuples."""
     n = len(rows)
-    err = sum(1 for r in rows if r["status"] == 2)
-    return {"n": n, "err": err, "err_pct": 100 * err / n if n else 0.0, "p95": _pct(d, .95)}
+    err = sum(1 for st, _ in rows if st == 2)
+    return {"n": n, "err": err, "err_pct": 100 * err / n if n else 0.0, "p95": _pct(sorted(d for _, d in rows), .95)}
 
 
 _SEV_RANK = {"critical": 0, "warning": 1, "info": 2}
@@ -1219,15 +1219,24 @@ def insights(minutes: float = 60):
         out.append({"severity": sev, "kind": kind, "service": svc, "title": title, "detail": detail, "link": link})
 
     recent_ns = now - int(min(minutes, 5) * 60e9)
-    svcs = [r["service"] for r in q("SELECT DISTINCT service FROM spans WHERE start_ns>=?", (tp,))]
-    for s in svcs:
-        cur, prev = _win(s, t0, now + 1), _win(s, tp, t0)
+    # Grouped scans instead of several queries per service: one pass over both windows' root spans, one for the last
+    # minutes, one for error logs (partial index ix_logs_err).
+    cur_w, prev_w = {}, {}
+    for svc, st, status, dur in qrows("SELECT service, start_ns, status, dur_ms FROM spans "
+                                      "WHERE start_ns>=? AND start_ns<? AND (parent_id='' OR kind=2)", (tp, now + 1)):
+        (cur_w if st >= t0 else prev_w).setdefault(svc, []).append((status, dur))
+    last5s = dict(qrows("SELECT service, COUNT(*) FROM spans WHERE start_ns>=? AND (parent_id='' OR kind=2) GROUP BY service",
+                        (recent_ns,)))
+    logc = {r[0]: (r[1] or 0, r[2]) for r in qrows("SELECT service, SUM(ts_ns>=?), COUNT(*) FROM logs "
+                                                     "WHERE severity>=17 AND ts_ns>=? GROUP BY service", (recent_ns, t0))}
+    for s in sorted(set(cur_w) | set(prev_w)):
+        cur, prev = _agg(cur_w.get(s, [])), _agg(prev_w.get(s, []))
         if cur["n"] == 0:
             if prev["n"] >= 5:
                 add("critical", "silent", s, f"{s} stopped reporting",
                     f"No requests in the last {minutes:g} min (previous window: {prev['n']}).", f"#/services/{s}")
             continue
-        last5 = q("SELECT COUNT(*) n FROM spans WHERE service=? AND start_ns>=? AND (parent_id='' OR kind=2)", (s, recent_ns))[0]["n"]
+        last5 = last5s.get(s, 0)
         if last5 == 0 and cur["n"] >= 5:
             add("critical", "silent", s, f"{s} went silent",
                 f"{cur['n']} requests earlier in the window but none in the last {min(minutes, 5):g} min.", f"#/services/{s}")
@@ -1241,8 +1250,7 @@ def insights(minutes: float = 60):
             add("warning", "latency", s, f"p95 latency drift on {s}",
                 f"p95 {cur['p95']:.0f}ms vs {prev['p95']:.0f}ms in the prior window (+{100 * (cur['p95'] / prev['p95'] - 1):.0f}%).",
                 f"#/services/{s}")
-        e5 = q("SELECT COUNT(*) n FROM logs WHERE service=? AND severity>=17 AND ts_ns>=?", (s, recent_ns))[0]["n"]
-        eall = q("SELECT COUNT(*) n FROM logs WHERE service=? AND severity>=17 AND ts_ns>=?", (s, t0))[0]["n"]
+        e5, eall = logc.get(s, (0, 0))
         mins5 = min(minutes, 5)
         if e5 >= 5 and e5 / mins5 > 3 * (eall / max(minutes, 1)):
             add("warning", "log_burst", s, f"Error log burst on {s}",
@@ -2408,7 +2416,8 @@ def worker():
 
 def cache_warmer():
     """Self-hosted only: while someone has used the dashboards in the last 5 minutes, keep the heavy aggregates warm
-    so page loads are instant. Idle instances do no extra work."""
+    so page loads are instant. Idle instances do no extra work. Starts warm so the first visit after a restart is fast."""
+    _last_use[0] = time.time()
     while True:
         busy = 0.0
         if CACHE_TTL > 0 and time.time() - _last_use[0] < 300:

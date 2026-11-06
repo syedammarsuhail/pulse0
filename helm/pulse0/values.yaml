@@ -92,6 +92,8 @@ resources:
 
 env:
   PULSE0_RETENTION_HOURS: "72"
+  # Seconds the heavy dashboard aggregates (home, services, map, insights) are cached; a background warmer keeps them fresh.
+  PULSE0_CACHE_TTL: "45"
 
 nodeSelector: {}
 tolerations: []
