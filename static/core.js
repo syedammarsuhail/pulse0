@@ -54,7 +54,7 @@
   const clock = t => new Date(t).toLocaleTimeString([], { hour12: false });
   const stamp = t => new Date(t).toLocaleString([], { hour12: false });
   const ago = t => { const s = Math.max(0, (Date.now() - t) / 1000); return s < 60 ? `${s | 0}s ago` : s < 3600 ? `${(s / 60) | 0}m ago` : s < 86400 ? `${(s / 3600) | 0}h ago` : `${(s / 86400) | 0}d ago`; };
-  const sevName = n => n >= 21 ? "FATAL" : n >= 17 ? "ERROR" : n >= 13 ? "WARN" : n >= 9 ? "INFO" : n >= 5 ? "DEBUG" : "TRACE";
+  const sevName = n => n >= 21 ? "FATAL" : n >= 17 ? "ERROR" : n >= 13 ? "WARN" : n >= 9 ? "INFO" : n >= 5 ? "DEBUG" : n >= 1 ? "TRACE" : "UNSET";
   const pill = (txt, kind = "", title) => el("span", { class: "pill " + kind, title }, txt);
   const errPill = p => pill(pct(p), p >= 5 ? "err" : p >= 1 ? "warn" : "ok");
   const healthPill = h => h && h.score != null ? pill([el("i", { class: "d" }), `${Math.round(h.score)} · ${h.state}`], h.state === "healthy" ? "ok" : h.state === "degraded" ? "warn" : "err", h.reason) : pill("no traffic", "");

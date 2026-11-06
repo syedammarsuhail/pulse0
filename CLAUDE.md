@@ -38,4 +38,6 @@ Env: `PULSE0_PORT`, `PULSE0_DB`, `PULSE0_RETENTION_HOURS`, `PULSE0_TOKEN` (beare
 - Pin `--kube-context` on every kubectl/helm call when other clusters exist in kubeconfig; never run in-cluster cleanup against the current context.
 - CodeBuild source zips must be made with Windows `tar -a -c -f x.zip` (`/c/Windows/System32/tar.exe` from Git Bash), not `Compress-Archive` (backslash paths) or GNU tar. Docker Hub rate-limits CodeBuild; use `public.ecr.aws/docker/library/...` base images. In Git Bash set `MSYS_NO_PATHCONV=1` for `aws` log-group names and S3 paths.
 - After a UI redeploy, browsers may need one hard reload (Ctrl+Shift+R).
-- Known open items: collector `filelog` logs `reader.go:148 process: %w` errors for some pods (cause not isolated); the cluster-collector split and hosted mode have not been run on a live cluster; the Claude assistant has not been tried with a real key.
+- The collector's `filelog` receiver needs `include_file_path: true` for the `container` operator (otherwise `reader.go:148 ... cannot be parsed as log path field` floods the logs). Container logs have no `service.name`; ingest falls back to `k8s.container.name`.
+- Verified on a live EKS cluster (Nov 2026): cluster-collector Deployment, hosted-mode tenant isolation, filelog fix. The log-name fallback is only covered by a unit test, not yet deployed. The Claude assistant has not been tried with a real key (user supplies it).
+- `eks-e2e-aws.ps1` must call `System32\tar.exe` by full path; run from Git Bash, plain `tar` is GNU tar and produces a bad zip.

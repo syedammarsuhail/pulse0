@@ -945,7 +945,7 @@ def logs_facets(minutes: float = 60, service: str = "", q_: str = ""):
     return {
         "service": q(f"SELECT service value, COUNT(*) n FROM logs WHERE {w} GROUP BY service ORDER BY n DESC LIMIT 25", args),
         "severity": q(f"""SELECT CASE WHEN severity>=21 THEN 'FATAL' WHEN severity>=17 THEN 'ERROR' WHEN severity>=13 THEN 'WARN'
-                          WHEN severity>=9 THEN 'INFO' WHEN severity>=5 THEN 'DEBUG' ELSE 'TRACE' END value, COUNT(*) n
+                          WHEN severity>=9 THEN 'INFO' WHEN severity>=5 THEN 'DEBUG' WHEN severity>=1 THEN 'TRACE' ELSE 'UNSET' END value, COUNT(*) n
                           FROM logs WHERE {w} GROUP BY value ORDER BY n DESC""", args),
     }
 
