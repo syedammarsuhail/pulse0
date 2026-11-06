@@ -161,7 +161,7 @@ spec:
         imagePullPolicy: Always
         ports: [{containerPort: 8000}]
         env:
-        - {name: PULSE0_URL, value: "http://ad27fe76e8627495cbe85cee306ed7ae-1112606549.us-east-1.elb.amazonaws.com:4318"}
+        - {name: PULSE0_URL, value: "http://a93334de6484b43fa9515125c36872ee-1140574398.us-east-1.elb.amazonaws.com:4318"}
         resources: {requests: {cpu: 20m, memory: 16Mi}, limits: {memory: 64Mi}}
 ---
 apiVersion: v1

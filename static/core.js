@@ -229,6 +229,7 @@
     const page = el("div", { class: "page" + (m.view.scroll ? " scroll" : "") });
     const keeps = {}; document.querySelectorAll("#main [data-keep]").forEach((n, i) => keeps[(n.dataset.keep || "") + i] = n.scrollTop);
     const mainTop = $("#main").scrollTop;
+    if (!opts.refresh) $("#main").replaceChildren(el("div", { class: "page" }, el("div", { class: "muted", style: "padding:48px;text-align:center" }, "Loading…")));
     try {
       const ctx = { params: m.params, q: r.q, refresh: !!opts.refresh, page };
       const crumbs = m.view.crumbs ? await m.view.crumbs(ctx) : [[m.view.title]];

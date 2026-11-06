@@ -146,6 +146,52 @@ def qcol(sql, args=()):
         return [r[0] for r in conn.execute(sql, args)]
 
 
+# ---------------------------------------------------------------- heavy-read cache
+# Aggregates over the whole time window (services, map, insights, home) cost seconds at ~1M spans. Concurrent callers share one
+# computation (single-flight) and results live for CACHE_TTL seconds; a background warmer refreshes them while the UI is in use.
+CACHE_TTL = float(os.environ.get("PULSE0_CACHE_TTL", "20"))
+_last_use = [0.0]
+_warming = threading.local()
+
+
+def ttl_cached(fn):
+    import functools, inspect
+    sig = inspect.signature(fn)
+    cache, locks = {}, {}
+
+    def key_of(a, kw):
+        b = sig.bind(*a, **kw); b.apply_defaults()
+        return (_cur_db.get(), tuple(sorted(b.arguments.items())))
+
+    @functools.wraps(fn)
+    def wrapper(*a, **kw):
+        if CACHE_TTL <= 0:
+            return fn(*a, **kw)
+        if not getattr(_warming, "on", False):
+            _last_use[0] = time.time()
+        k = key_of(a, kw)
+        hit = cache.get(k)
+        if hit and time.time() - hit[0] < CACHE_TTL:
+            return hit[1]
+        with locks.setdefault(k, threading.Lock()):
+            hit = cache.get(k)
+            if hit and time.time() - hit[0] < CACHE_TTL:
+                return hit[1]
+            v = fn(*a, **kw)
+            if len(cache) > 256:
+                cache.pop(min(cache, key=lambda x: cache[x][0]), None)
+            cache[k] = (time.time(), v)
+            return v
+
+    def refresh(*a, **kw):
+        k = key_of(a, kw)
+        with locks.setdefault(k, threading.Lock()):
+            cache[k] = (time.time(), fn(*a, **kw))
+
+    wrapper.refresh = refresh
+    return wrapper
+
+
 def q(sql, args=()):
     if _cur_db.get() is None and sql.lstrip().upper().startswith(("SELECT", "WITH")):
         return [dict(r) for r in _reader().execute(sql, args).fetchall()]
@@ -476,6 +522,7 @@ def since_ns(minutes):
 
 # ---- resources / services (RED)
 @app.get("/api/services")
+@ttl_cached
 def services(minutes: float = 60):
     t0 = since_ns(minutes)
     # One scan: counts, errors, avg/max and percentiles per service, aggregated in Python from plain tuples.
@@ -538,6 +585,7 @@ def operations(service: str, minutes: float = 60):
 
 # ---- service map
 @app.get("/api/map")
+@ttl_cached
 def service_map(minutes: float = 60):
     t0 = since_ns(minutes)
     edges = q("""SELECT p.service src, c.service dst, COUNT(*) calls, SUM(c.status=2) err, AVG(c.dur_ms) avg_ms
@@ -1012,6 +1060,7 @@ _SEV_RANK = {"critical": 0, "warning": 1, "info": 2}
 
 
 @app.get("/api/insights")
+@ttl_cached
 def insights(minutes: float = 60):
     """Rule-based findings across all signals. Each: {severity, service, title, detail, link, kind}."""
     now = time.time_ns()
@@ -1069,6 +1118,7 @@ def insights(minutes: float = 60):
 
 
 @app.get("/api/home")
+@ttl_cached
 def home(minutes: float = 60, buckets: int = 60):
     t0 = since_ns(minutes)
     w = int(minutes * 60 * 1e9 / buckets)
@@ -2035,9 +2085,29 @@ def worker():
         time.sleep(5)
 
 
+def cache_warmer():
+    """Self-hosted only: while someone has used the dashboards in the last 5 minutes, keep the heavy aggregates warm
+    so page loads are instant. Idle instances do no extra work."""
+    while True:
+        busy = 0.0
+        if CACHE_TTL > 0 and time.time() - _last_use[0] < 300:
+            t = time.time(); _warming.on = True
+            try:
+                for m in (15, 60):
+                    services.refresh(float(m)); insights.refresh(float(m)); home.refresh(float(m), 60); service_map.refresh(float(m))
+            except Exception as e:
+                print("cache warmer error:", e)
+            finally:
+                _warming.on = False
+            busy = time.time() - t
+        time.sleep(max(8.0, busy))  # never more than ~50% duty cycle
+
+
 @app.on_event("startup")
 def _start():
     threading.Thread(target=worker, daemon=True).start()
+    if not HOSTED:
+        threading.Thread(target=cache_warmer, daemon=True).start()
 
 
 @app.get("/")

@@ -21,6 +21,7 @@ import httpx
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+os.environ["PULSE0_CACHE_TTL"] = "0"  # tests read their own writes immediately
 os.environ["PULSE0_DB"] = "/tmp/pulse0_test.db"
 if os.path.exists("/tmp/pulse0_test.db"):
     os.remove("/tmp/pulse0_test.db")
@@ -752,3 +753,21 @@ async def test_traces_listing_is_newest_first_and_limited():
     assert len(rows) == 2 and rows[0]["start_ns"] >= rows[1]["start_ns"]
     errs = (await client.get("/api/traces", params={"service": "list-svc", "errors": "true"})).json()
     assert len(errs) == 3 and all(r["errors"] >= 1 for r in errs)
+
+
+def test_ttl_cache_single_flight_and_expiry(monkeypatch):
+    import threading
+    monkeypatch.setattr(server, "CACHE_TTL", 0.3)
+    calls = []
+
+    @server.ttl_cached
+    def heavy(minutes: float = 60):
+        calls.append(minutes); time.sleep(0.2); return {"m": minutes}
+
+    out = []
+    ts = [threading.Thread(target=lambda: out.append(heavy(15.0))) for _ in range(6)]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    assert len(calls) == 1 and all(o == {"m": 15.0} for o in out)      # six concurrent callers, one computation
+    assert heavy(15) == {"m": 15.0} and len(calls) == 1                  # int/float args share the entry
+    time.sleep(0.35); heavy(15.0); assert len(calls) == 2                # expired -> recomputed
+    heavy(60.0); assert len(calls) == 3                                  # different args -> separate entry

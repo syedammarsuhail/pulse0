@@ -6,6 +6,8 @@ contextvar that must reach sync endpoints running in the threadpool, which is ex
 """
 import importlib.util, os, secrets, sys, tempfile, time
 import pytest
+
+os.environ["PULSE0_CACHE_TTL"] = "0"  # tests read their own writes immediately
 from fastapi.testclient import TestClient
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
