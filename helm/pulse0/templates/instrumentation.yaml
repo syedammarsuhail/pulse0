@@ -1,0 +1,58 @@
+{{- if and .Values.autoInstrumentation.enabled (.Capabilities.APIVersions.Has "opentelemetry.io/v1alpha1/Instrumentation") -}}
+# Pulse0 Instrumentation CR - consumed by the OpenTelemetry Operator.
+# When a pod is annotated, the Operator injects the matching language agent
+# as an init container. Zero source code change required.
+#
+# Prerequisite (one-time, cluster-wide):
+#   kubectl apply -f https://github.com/open-telemetry/opentelemetry-operator/releases/latest/download/opentelemetry-operator.yaml
+#
+# Then opt-in per workload with one annotation:
+#   instrumentation.opentelemetry.io/inject-python:  "true"      # Python apps
+#   instrumentation.opentelemetry.io/inject-java:    "true"      # Java/Spring Boot apps
+#   instrumentation.opentelemetry.io/inject-nodejs:  "true"      # Node.js apps
+#   instrumentation.opentelemetry.io/inject-dotnet:  "true"      # .NET apps
+#   instrumentation.opentelemetry.io/inject-go:      "true"      # Go apps (eBPF based)
+#   instrumentation.opentelemetry.io/inject-sdk:     "true"      # Browser/Angular/React apps
+#
+# No code changes, no Dockerfile changes, no build-time steps. Pulse0 picks it up.
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: pulse0
+  labels: {{- include "pulse0.labels" . | nindent 4 }}
+spec:
+  exporter:
+    endpoint: http://{{ include "pulse0.fullname" . }}-collector.{{ .Release.Namespace }}.svc.cluster.local:4317
+  propagators:
+    - tracecontext
+    - baggage
+    - b3
+  sampler:
+    type: parentbased_traceidratio
+    argument: "{{ .Values.autoInstrumentation.samplingRatio }}"
+  resource:
+    addK8sUIDAttributes: true
+  env:
+    - name: OTEL_LOGS_EXPORTER
+      value: otlp
+    - name: OTEL_METRICS_EXPORTER
+      value: otlp
+    - name: OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED
+      value: "true"
+
+  # ---- language-specific agents (fully auto, no code change) ----
+  python:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python:latest
+  java:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-java:latest
+  nodejs:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-nodejs:latest
+  dotnet:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-dotnet:latest
+  go:
+    image: ghcr.io/open-telemetry/opentelemetry-go-instrumentation/autoinstrumentation-go:latest
+  apacheHttpd:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-apache-httpd:latest
+  nginx:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-nginx:latest
+{{- end }}

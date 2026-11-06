@@ -1,0 +1,10 @@
+__pycache__/
+.pytest_cache/
+*.db
+*.db-wal
+*.db-shm
+node_modules/
+e2e-run*.log
+pulse0.tar.gz
+*.zip
+.env

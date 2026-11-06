@@ -1,0 +1,11 @@
+apiVersion: v2
+name: pulse0
+description: Pulse0 - OpenTelemetry-native personal observability platform
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [observability, opentelemetry, tracing, logs, metrics, apm]
+home: https://github.com/ammarsuhail/pulse0
+maintainers:
+  - name: Ammar Suhail
+    email: ammarsuhail155@gmail.com

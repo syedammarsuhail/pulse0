@@ -1,0 +1,49 @@
+# Pulse0 on Amazon EKS — overlay values.
+# helm install pulse0 ./helm/pulse0 -n observability --create-namespace -f values-eks.yaml
+
+image:
+  repository: <acct>.dkr.ecr.<region>.amazonaws.com/pulse0   # push to ECR
+  tag: "0.1.0"
+
+# EBS-backed persistent storage via the AWS EBS CSI driver.
+# Requires the aws-ebs-csi-driver addon on the cluster.
+persistence:
+  enabled: true
+  size: 50Gi
+  storageClass: gp3            # create a gp3 StorageClass, or use the cluster default
+
+service:
+  type: ClusterIP
+
+# Expose via the AWS Load Balancer Controller (internal NLB shown; drop the
+# annotation for internet-facing). Alternatively use an ALB Ingress.
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:<region>:<acct>:certificate/<id>
+  hosts:
+    - host: pulse0.internal.yourcompany.com
+      paths: [{ path: /, pathType: Prefix }]
+
+auth:
+  token: "set-via--set-or-sealed-secret"
+
+env:
+  PULSE0_RETENTION_HOURS: "168"
+
+# The bundled collector picks up EKS cluster + EC2 cloud attributes automatically
+# (eks/ec2 resourcedetection). No IRSA needed for the basic setup — it only reads
+# the kubelet and the K8s API via its ServiceAccount (RBAC is in the chart).
+collector:
+  enabled: true
+  resources:
+    limits: { cpu: 500m, memory: 512Mi }
+    requests: { cpu: 100m, memory: 128Mi }
+
+# IRSA is only needed later for Tier-3 S3 cold storage (see HARDENING.md).
+# Then: create an IAM role for the pulse0 ServiceAccount and annotate it with
+#   eks.amazonaws.com/role-arn: arn:aws:iam::<acct>:role/pulse0-s3

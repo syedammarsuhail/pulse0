@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"/><title>Storefront (Angular RUM test)</title>
+<script>
+  window.PULSE0_ENDPOINT = "http://ad27fe76e8627495cbe85cee306ed7ae-1112606549.us-east-1.elb.amazonaws.com:4318/v1/traces";
+  window.PULSE0_SERVICE = "lang-angular";
+  // WORKAROUND for Pulse0 CORS bug (server answers "access-control-allow-origin: *", which browsers reject for the
+  // credentialed requests sendBeacon makes). Remove once the server reflects the Origin with allow_credentials.
+  navigator.sendBeacon = (u, d) => { fetch(u, { method: "POST", body: d, keepalive: true, credentials: "omit" }).catch(() => {}); return true; };
+</script>
+<script src="otel-rum.js"></script></head>
+<body style="font-family:sans-serif;max-width:720px;margin:40px auto">
+<h1>Storefront (browser RUM test)</h1>
+<button id="b" onclick="fetch('/api/work').then(r=>r.text()).then(t=>out.textContent=t)">Call /api/work (lang-node via nginx)</button>
+<pre id="out"></pre></body></html>

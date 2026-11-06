@@ -1,0 +1,74 @@
+# Pulse0 on bare-metal Kubernetes (on-prem, k3s, kubeadm, Rancher, OpenShift, etc.)
+# helm install pulse0 ./helm/pulse0 -n observability --create-namespace -f values-baremetal.yaml
+#
+# Bare metal has no cloud LoadBalancer and no cloud StorageClass, so you pick:
+#   - storage:  local-path / Longhorn / OpenEBS / Rook-Ceph / Portworx / NFS
+#   - expose:   NodePort (easy), MetalLB (gives you real LoadBalancers), or Ingress
+# Pick what's already installed on your cluster.
+
+image:
+  repository: pulse0           # load via `kind load docker-image`, k3s imports, or a private registry
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent     # change to Never if the image is already on every node
+
+# STORAGE
+# Check what's on your cluster:   kubectl get storageclass
+#   - k3s / RKE2 default       : "local-path" (host-path, zone-bound but easy)
+#   - Longhorn                 : "longhorn" (replicated, best default for prod bare-metal)
+#   - OpenEBS                  : "openebs-hostpath" or "openebs-jiva-csi-default"
+#   - Rook-Ceph                : "rook-ceph-block"
+#   - NFS subdir provisioner   : "nfs-client"
+persistence:
+  enabled: true
+  size: 50Gi
+  storageClass: local-path     # change to what you have
+  accessMode: ReadWriteOnce
+
+# EXPOSE THE UI
+# Option A - ClusterIP + port-forward (dev only):
+#   kubectl -n observability port-forward svc/pulse0 4318:4318
+# Option B - NodePort (simple prod):
+service:
+  type: NodePort               # exposes on every node's IP at a random high port
+  # port: 4318                 # keep ClusterIP port
+  # nodePort: 30418            # pin the node port if you want (30000-32767)
+# Option C - MetalLB LoadBalancer: set service.type=LoadBalancer and configure MetalLB.
+# Option D - Ingress (ingress-nginx is the typical bare-metal choice):
+ingress:
+  enabled: false
+  className: nginx             # or traefik, haproxy, contour...
+  annotations: {}
+  hosts:
+    - host: pulse0.lab.local
+      paths: [{ path: /, pathType: Prefix }]
+
+auth:
+  token: "change-me"           # set to a strong random string in prod
+
+env:
+  PULSE0_RETENTION_HOURS: "168"
+
+# COLLECTOR
+# Bare-metal kubelets commonly use self-signed certs; insecure_skip_verify is already
+# true in the collector config. k3s puts logs at the standard /var/log/pods path.
+# On OpenShift you may need SCC privileges for the hostPath mount - add a NetworkPolicy
+# exception or SCC binding if filelog fails.
+collector:
+  enabled: true
+  resources:
+    limits:   { cpu: 500m, memory: 512Mi }
+    requests: { cpu: 50m,  memory: 128Mi }
+  # Lower sampling if the cluster is high-traffic (bare-metal disks are usually smaller)
+  # (below 100 skews the stored error rate; see values.yaml)
+  traceSamplingPercent: 15
+
+# NODE PLACEMENT
+# Keep Pulse0 on a stable node (SQLite is single-writer). If you have multi-node
+# bare metal, pin the StatefulSet to one node by labelling it and using nodeSelector:
+#   kubectl label node <name> pulse0=true
+# nodeSelector:
+#   pulse0: "true"
+
+# Recommended label-and-pin for the PVC:
+# tolerations: []
+# affinity: {}

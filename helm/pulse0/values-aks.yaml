@@ -1,0 +1,51 @@
+# Pulse0 on Azure AKS — overlay values.
+# helm install pulse0 ./helm/pulse0 -n observability --create-namespace -f values-aks.yaml
+
+image:
+  repository: <registry>.azurecr.io/pulse0     # push to ACR; attach ACR to AKS
+  tag: "0.1.0"
+
+# Azure Disk CSI storage. Built-in StorageClasses:
+#   managed-csi           (Standard SSD)
+#   managed-csi-premium   (Premium SSD — use for heavier ingest)
+persistence:
+  enabled: true
+  size: 50Gi
+  storageClass: managed-csi-premium
+
+service:
+  type: ClusterIP
+
+# Expose via AGIC (Application Gateway Ingress Controller) or ingress-nginx.
+# ingress-nginx example shown; for an internal Azure LB add the service annotation
+# service.beta.kubernetes.io/azure-load-balancer-internal: "true" on the controller.
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: letsencrypt   # if using cert-manager
+  hosts:
+    - host: pulse0.internal.yourcompany.com
+      paths: [{ path: /, pathType: Prefix }]
+  tls:
+    - hosts: [pulse0.internal.yourcompany.com]
+      secretName: pulse0-tls
+
+auth:
+  token: "set-via--set-or-azure-keyvault-csi"
+
+env:
+  PULSE0_RETENTION_HOURS: "168"
+
+# The bundled collector picks up AKS cluster + Azure VM attributes automatically
+# (aks/azure resourcedetection). No Workload Identity needed for the basic setup;
+# it only reads the kubelet and K8s API via its ServiceAccount.
+collector:
+  enabled: true
+  resources:
+    limits: { cpu: 500m, memory: 512Mi }
+    requests: { cpu: 100m, memory: 128Mi }
+
+# Azure Workload Identity is only needed later for Tier-3 Blob cold storage.
+# Then federate the pulse0 ServiceAccount with a managed identity and label the pod.

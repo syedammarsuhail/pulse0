@@ -1,0 +1,192 @@
+apiVersion: v1
+kind: Namespace
+metadata: {name: langtest}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: lang-python, namespace: langtest}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: lang-python}}
+  template:
+    metadata: {labels: {app: lang-python}}
+    spec:
+      containers:
+      - name: app
+        image: 339713148266.dkr.ecr.us-east-1.amazonaws.com/pulse0-e2e:lang-python
+        imagePullPolicy: Always
+        ports: [{containerPort: 8000}]
+        env:
+        - {name: OTEL_SERVICE_NAME, value: "lang-python"}
+        - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://pulse0-collector.observability.svc.cluster.local:4319"}
+        - {name: OTEL_EXPORTER_OTLP_PROTOCOL, value: "http/protobuf"}
+        - {name: OTEL_RESOURCE_ATTRIBUTES, value: "deployment.environment=langtest"}
+        resources: {requests: {cpu: 50m, memory: 256Mi}, limits: {memory: 768Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: lang-python, namespace: langtest}
+spec:
+  selector: {app: lang-python}
+  ports: [{port: 8000, targetPort: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: lang-node, namespace: langtest}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: lang-node}}
+  template:
+    metadata: {labels: {app: lang-node}}
+    spec:
+      containers:
+      - name: app
+        image: 339713148266.dkr.ecr.us-east-1.amazonaws.com/pulse0-e2e:lang-node
+        imagePullPolicy: Always
+        ports: [{containerPort: 8000}]
+        env:
+        - {name: OTEL_SERVICE_NAME, value: "lang-node"}
+        - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://pulse0-collector.observability.svc.cluster.local:4319"}
+        - {name: OTEL_EXPORTER_OTLP_PROTOCOL, value: "http/protobuf"}
+        - {name: OTEL_RESOURCE_ATTRIBUTES, value: "deployment.environment=langtest"}
+        resources: {requests: {cpu: 50m, memory: 256Mi}, limits: {memory: 768Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: lang-node, namespace: langtest}
+spec:
+  selector: {app: lang-node}
+  ports: [{port: 8000, targetPort: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: lang-java, namespace: langtest}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: lang-java}}
+  template:
+    metadata: {labels: {app: lang-java}}
+    spec:
+      containers:
+      - name: app
+        image: 339713148266.dkr.ecr.us-east-1.amazonaws.com/pulse0-e2e:lang-java
+        imagePullPolicy: Always
+        ports: [{containerPort: 8000}]
+        env:
+        - {name: OTEL_SERVICE_NAME, value: "lang-java"}
+        - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://pulse0-collector.observability.svc.cluster.local:4319"}
+        - {name: OTEL_EXPORTER_OTLP_PROTOCOL, value: "http/protobuf"}
+        - {name: OTEL_RESOURCE_ATTRIBUTES, value: "deployment.environment=langtest"}
+        resources: {requests: {cpu: 50m, memory: 384Mi}, limits: {memory: 768Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: lang-java, namespace: langtest}
+spec:
+  selector: {app: lang-java}
+  ports: [{port: 8000, targetPort: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: lang-dotnet, namespace: langtest}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: lang-dotnet}}
+  template:
+    metadata: {labels: {app: lang-dotnet}}
+    spec:
+      containers:
+      - name: app
+        image: 339713148266.dkr.ecr.us-east-1.amazonaws.com/pulse0-e2e:lang-dotnet
+        imagePullPolicy: Always
+        ports: [{containerPort: 8000}]
+        env:
+        - {name: OTEL_SERVICE_NAME, value: "lang-dotnet"}
+        - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://pulse0-collector.observability.svc.cluster.local:4319"}
+        - {name: OTEL_EXPORTER_OTLP_PROTOCOL, value: "http/protobuf"}
+        - {name: OTEL_RESOURCE_ATTRIBUTES, value: "deployment.environment=langtest"}
+        resources: {requests: {cpu: 50m, memory: 256Mi}, limits: {memory: 768Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: lang-dotnet, namespace: langtest}
+spec:
+  selector: {app: lang-dotnet}
+  ports: [{port: 8000, targetPort: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: lang-go, namespace: langtest}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: lang-go}}
+  template:
+    metadata: {labels: {app: lang-go}}
+    spec:
+      containers:
+      - name: app
+        image: 339713148266.dkr.ecr.us-east-1.amazonaws.com/pulse0-e2e:lang-go
+        imagePullPolicy: Always
+        ports: [{containerPort: 8000}]
+        env:
+        - {name: OTEL_SERVICE_NAME, value: "lang-go"}
+        - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://pulse0-collector.observability.svc.cluster.local:4319"}
+        - {name: OTEL_EXPORTER_OTLP_PROTOCOL, value: "http/protobuf"}
+        - {name: OTEL_RESOURCE_ATTRIBUTES, value: "deployment.environment=langtest"}
+        resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 768Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: lang-go, namespace: langtest}
+spec:
+  selector: {app: lang-go}
+  ports: [{port: 8000, targetPort: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: lang-angular, namespace: langtest}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: lang-angular}}
+  template:
+    metadata: {labels: {app: lang-angular}}
+    spec:
+      containers:
+      - name: app
+        image: 339713148266.dkr.ecr.us-east-1.amazonaws.com/pulse0-e2e:lang-angular
+        imagePullPolicy: Always
+        ports: [{containerPort: 8000}]
+        env:
+        - {name: OTEL_SERVICE_NAME, value: "lang-angular"}
+        - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://pulse0-collector.observability.svc.cluster.local:4319"}
+        - {name: OTEL_EXPORTER_OTLP_PROTOCOL, value: "http/protobuf"}
+        - {name: OTEL_RESOURCE_ATTRIBUTES, value: "deployment.environment=langtest"}
+        resources: {requests: {cpu: 50m, memory: 32Mi}, limits: {memory: 768Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: lang-angular, namespace: langtest}
+spec:
+  selector: {app: lang-angular}
+  ports: [{port: 8000, targetPort: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: loadloop, namespace: langtest}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: loadloop}}
+  template:
+    metadata: {labels: {app: loadloop}}
+    spec:
+      containers:
+      - name: loop
+        image: public.ecr.aws/docker/library/alpine:3.20
+        command: ["/bin/sh","-c"]
+        args:
+        - |
+          while true; do
+            for s in lang-node lang-java lang-dotnet lang-go; do wget -q -T 5 -O /dev/null http://$s:8000/work || true; done
+            sleep 0.3
+          done
+        resources: {requests: {cpu: 10m, memory: 16Mi}}

@@ -1,0 +1,123 @@
+# Default values for pulse0.
+
+image:
+  repository: pulse0
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1  # Pulse0 uses SQLite; keep at 1 (scale via multiple instances + external LB if needed)
+
+service:
+  type: ClusterIP
+  port: 4318
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: pulse0.example.com
+      paths: [{ path: /, pathType: Prefix }]
+  tls: []
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+auth:
+  # Optional bearer token enforced on /v1/* and /api/*.
+  # Leave empty to disable auth (dev/internal only).
+  token: ""
+
+# Deployment mode.
+#   selfhosted (default): classic single-tenant Pulse0. One SQLite database on the PVC; your data stays in
+#                         your own cluster. Optional bearer token via auth.token.
+#   hosted:               Pulse-hosted multi-tenant service. Organizations -> projects (one SQLite file each
+#                         under hosted.dataDir) -> hashed API keys, per-org daily ingest caps and retention.
+#                         auth.token is ignored; the platform operator uses the admin token below.
+# Hosted mode stores every tenant on the PVC: size persistence.size for the sum of all projects
+# (roughly 0.3-1 GB per million spans at default retention) and keep replicaCount at 1.
+mode: selfhosted
+hosted:
+  # REQUIRED when mode=hosted. Existing Secret that holds the platform admin token (never put it in values):
+  #   kubectl -n observability create secret generic pulse0-admin --from-literal=admin-token=$(openssl rand -hex 32)
+  adminTokenSecret: ""
+  adminTokenKey: admin-token
+  dataDir: /data/tenants
+  # REQUIRED when mode=hosted and collector.enabled: Secret with an ingest key of the operator's own project,
+  # used by the bundled collector to ship cluster telemetry (create the key with POST /admin/orgs/<id>/keys):
+  #   kubectl -n observability create secret generic pulse0-collector-key --from-literal=ingest-key=<p0i_...>
+  collectorKeySecret: ""
+  collectorKeyKey: ingest-key
+  # Off by default: hosted mode never forwards tenant data to Anthropic unless you opt in here AND enable ai.*.
+  allowAI: false
+
+# Claude-backed 'Ask Pulse0' assistant (the rule-based assistant always works without this).
+# The API key is NEVER stored in values/files. Create the secret yourself, then restart the pod:
+#   kubectl -n observability create secret generic pulse0-anthropic --from-literal=api-key=<YOUR_KEY>
+#   kubectl -n observability rollout restart statefulset/pulse0
+ai:
+  enabled: false
+  existingSecret: pulse0-anthropic
+  secretKey: api-key
+  model: ""          # empty = server default (claude-sonnet-5-5)
+
+resources:
+  limits:   { cpu: 1000m, memory: 1Gi }
+  requests: { cpu: 100m,  memory: 256Mi }
+
+env:
+  PULSE0_RETENTION_HOURS: "72"
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+serviceAccount:
+  create: true
+  name: ""
+
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities: { drop: [ALL] }
+
+# Bundled OpenTelemetry Collector that forwards cluster signals to Pulse0.
+# Enable it to get full K8s observability with a single `helm install`.
+collector:
+  enabled: true
+  image: otel/opentelemetry-collector-contrib:0.111.0
+  # Cluster-wide Kubernetes metrics, collected by ONE pod (not once per node).
+  clusterMetrics:
+    enabled: true
+  # Collects: k8s metrics, host metrics, container logs, Prometheus pod
+  # endpoints (auto-discovered via prometheus.io/* annotations), and forwards
+  # OTLP from applications to Pulse0.
+  resources:
+    limits:   { cpu: 500m, memory: 512Mi }
+    requests: { cpu: 50m,  memory: 128Mi }
+  # SignalControl Edge: % of successful traces to keep (errors + slow are
+  # always kept). Lower this in high-traffic environments to cut storage.
+  # NOTE: values below 100 skew the stored error rate, because every errored/slow trace
+  # is kept but only this % of healthy traces. Keep 100 for accurate RED numbers.
+  traceSamplingPercent: 100
+
+# Create ServiceMonitor for Prometheus Operator
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+# Zero-code-change auto-instrumentation via the OpenTelemetry Operator.
+# After installing the Operator once (cluster-wide), you add one annotation
+# to any Deployment and its language agent is injected automatically.
+# Supported: Python, Java, Node.js, .NET, Go, Apache HTTPD, nginx, browser.
+autoInstrumentation:
+  enabled: true
+  samplingRatio: "1.0"   # 1.0 = capture everything; lower for high-traffic prod

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Pulse Shop (browser RUM)</title>
+<script>
+  // Browser RUM goes straight to Pulse0. Set PULSE0_URL at deploy time by editing this line (or via the nginx template).
+  window.PULSE0_ENDPOINT = "__PULSE0_URL__/v1/traces";
+  window.PULSE0_SERVICE = "shop-storefront";
+  // WORKAROUND for Pulse0 CORS bug (server answers "access-control-allow-origin: *", which browsers reject for the
+  // credentialed requests sendBeacon makes). Remove once the server reflects the Origin with allow_credentials.
+  navigator.sendBeacon = (u, d) => { fetch(u, { method: "POST", body: d, keepalive: true, credentials: "omit" }).catch(() => {}); return true; };
+</script>
+<script src="otel-rum.js"></script>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:860px;margin:32px auto;padding:0 16px;color:#1c2330}
+  h1{margin:0 0 4px} .sub{color:#667;margin:0 0 20px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+  button{padding:8px 14px;border:1px solid #c7cfdb;border-radius:8px;background:#f6f8fb;cursor:pointer;font:inherit}
+  button:hover{background:#e9eef6} button.on{background:#2f6df6;color:#fff;border-color:#2f6df6}
+  input{padding:8px;border:1px solid #c7cfdb;border-radius:8px;font:inherit}
+  pre{background:#0f1521;color:#cfe3ff;padding:12px;border-radius:10px;min-height:120px;overflow:auto;font-size:12.5px}
+  #stat{color:#667;font-size:13px}
+</style></head>
+<body>
+<h1>Pulse Shop</h1>
+<p class="sub">Browser storefront &rarr; gateway (Node) &rarr; catalog (Python) / orders (Java) &rarr; payments (.NET) + inventory (Go). Every click is a distributed trace.</p>
+<div class="row">
+  <button id="browse">Browse products</button>
+  <span><input id="q" value="widget" size="10"/> <button id="search">Search</button></span>
+  <button id="checkout">Checkout</button>
+  <button id="admin">Admin stats</button>
+  <button id="auto">Auto-run: off</button>
+</div>
+<div id="stat"></div>
+<pre id="out">Click a button&hellip;</pre>
+<script>
+  const out = document.getElementById("out"), stat = document.getElementById("stat");
+  let ok = 0, bad = 0;
+  async function call(label, url, init) {
+    const t0 = performance.now();
+    try {
+      const r = await fetch(url, init); const t = await r.text();
+      r.ok ? ok++ : bad++;
+      out.textContent = label + " -> HTTP " + r.status + " in " + Math.round(performance.now() - t0) + "ms\n" + t.slice(0, 600);
+    } catch (e) { bad++; out.textContent = label + " failed: " + e; }
+    stat.textContent = "ok " + ok + " / failed " + bad;
+  }
+  const act = {
+    browse: () => call("browse", "/api/products"),
+    search: () => call("search", "/api/search?q=" + encodeURIComponent(document.getElementById("q").value)),
+    checkout: () => call("checkout", "/api/checkout", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ items: [{ sku: "widget", qty: 1 }] }) }),
+    admin: () => call("admin", "/api/admin/stats"),
+  };
+  for (const k of Object.keys(act)) document.getElementById(k).onclick = act[k];
+  let timer = null;
+  document.getElementById("auto").onclick = e => {
+    if (timer) { clearInterval(timer); timer = null; e.target.textContent = "Auto-run: off"; e.target.classList.remove("on"); return; }
+    const names = Object.keys(act); let i = 0;
+    timer = setInterval(() => act[names[i++ % names.length]](), 1500);
+    e.target.textContent = "Auto-run: on"; e.target.classList.add("on");
+  };
+</script>
+</body></html>

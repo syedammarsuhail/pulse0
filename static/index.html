@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Pulse0 - Observability</title>
+<script>try{var t=localStorage.getItem("p0.theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css"/>
+</head>
+<body>
+<header id="top">
+  <a class="brand" href="#/home" title="Pulse0 home"><span class="logo"></span><b>Pulse0</b></a>
+  <button id="search-btn" class="search" title="Search (Ctrl+K)">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span>Search services, traces, metrics, pages…</span><kbd>Ctrl K</kbd>
+  </button>
+  <div class="top-right">
+    <button id="ask-btn" class="btn accent" title="Ask Pulse0 (rule-based investigation)">
+      <svg viewBox="0 0 24 24"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
+      Ask Pulse0
+    </button>
+    <div id="range-wrap" class="menu-wrap">
+      <button id="range-btn" class="btn" title="Time range"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span id="range-label">Last 1 hour</span><i class="caret"></i></button>
+    </div>
+    <button id="refresh" class="btn icon" title="Refresh now"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>
+    <label class="switch" title="Auto-refresh every 15s"><input type="checkbox" id="auto" checked/><span></span><em>Auto</em></label>
+    <button id="theme" class="btn icon" title="Toggle light / dark theme"><svg viewBox="0 0 24 24"><path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/></svg></button>
+    <div class="live" id="live" title="Connection to Pulse0"><span class="dot"></span><span id="status">connecting</span></div>
+  </div>
+</header>
+
+<div id="shell">
+  <nav id="rail" aria-label="Main navigation"></nav>
+  <section id="content">
+    <div id="crumbs"></div>
+    <main id="main" tabindex="-1"></main>
+  </section>
+</div>
+
+<div id="scrim" class="scrim"></div>
+<aside id="drawer" class="drawer" aria-hidden="true"></aside>
+<aside id="ask" class="drawer ask" aria-hidden="true"></aside>
+<div id="palette" class="palette" hidden></div>
+<div id="modal-root"></div>
+<div id="toasts"></div>
+
+<script src="/static/core.js"></script>
+<script src="/static/views.js"></script>
+<script src="/static/views2.js"></script>
+<script src="/static/mapkit.js"></script>
+<script src="/static/map.js"></script>
+<script src="/static/assistant.js"></script>
+<script src="/static/tenancy.js"></script>
+<script>Pulse0.start()</script>
+</body>
+</html>

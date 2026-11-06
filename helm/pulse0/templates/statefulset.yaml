@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "pulse0.fullname" . }}
+  labels: {{- include "pulse0.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "pulse0.fullname" . }}
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "pulse0.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "pulse0.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "pulse0.serviceAccountName" . }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: pulse0
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 4318
+              protocol: TCP
+          env:
+            - name: PULSE0_HOST
+              value: "0.0.0.0"
+            - name: PULSE0_PORT
+              value: "4318"
+            - name: PULSE0_DB
+              value: /data/pulse0.db
+            {{- if not (has .Values.mode (list "selfhosted" "hosted")) }}
+            {{- fail "mode must be 'selfhosted' or 'hosted'" }}
+            {{- end }}
+            - name: PULSE0_MODE
+              value: {{ .Values.mode | quote }}
+            {{- if eq .Values.mode "hosted" }}
+            - name: PULSE0_DATA_DIR
+              value: {{ .Values.hosted.dataDir | quote }}
+            - name: PULSE0_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "hosted.adminTokenSecret (an existing Secret with the platform admin token) is required when mode=hosted" .Values.hosted.adminTokenSecret }}
+                  key: {{ .Values.hosted.adminTokenKey }}
+            {{- if .Values.hosted.allowAI }}
+            - name: PULSE0_HOSTED_AI
+              value: "1"
+            {{- end }}
+            {{- end }}
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- if .Values.auth.token }}
+            - name: PULSE0_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pulse0.fullname" . }}-auth
+                  key: token
+            {{- end }}
+            {{- if .Values.ai.enabled }}
+            # Claude-backed 'Ask Pulse0'. optional:true so the pod still starts (in rule-based mode)
+            # if the secret has not been created yet; restart the pod after creating it.
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ai.existingSecret }}
+                  key: {{ .Values.ai.secretKey }}
+                  optional: true
+            {{- with .Values.ai.model }}
+            - name: PULSE0_AI_MODEL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [{{ .Values.persistence.accessMode }}]
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+  {{- end }}

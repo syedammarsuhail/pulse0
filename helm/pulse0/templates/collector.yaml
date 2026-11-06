@@ -1,0 +1,290 @@
+{{- if .Values.collector.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pulse0.fullname" . }}-collector
+  labels: {{- include "pulse0.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc: { endpoint: 0.0.0.0:4317 }
+          http: { endpoint: 0.0.0.0:4319 }
+      hostmetrics:
+        collection_interval: 30s
+        scrapers: { cpu: {}, memory: {}, disk: {}, filesystem: {}, network: {}, load: {} }
+      kubeletstats:
+        auth_type: serviceAccount
+        collection_interval: 30s
+        endpoint: "${env:K8S_NODE_NAME}:10250"
+        insecure_skip_verify: true
+      filelog:
+        include: [ /var/log/pods/*/*/*.log ]
+        # Never ingest the collector's own logs (feedback loop and unparseable stack traces).
+        exclude: [ /var/log/pods/*/otelcol/*.log ]
+        start_at: end
+        operators:
+          - type: container
+            id: container-parser
+            on_error: send_quiet
+      # Prometheus auto-scrape: any pod with the standard annotations
+      #   prometheus.io/scrape: "true"
+      #   prometheus.io/port:   "9090"
+      #   prometheus.io/path:   "/metrics"   (optional, default /metrics)
+      # is scraped automatically — zero config for apps that already expose /metrics.
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'kubernetes-pods'
+              scrape_interval: 30s
+              kubernetes_sd_configs: [{ role: pod }]
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                  action: keep
+                  regex: "true"
+                - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                  action: replace
+                  target_label: __metrics_path__
+                  regex: (.+)
+                - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                  action: replace
+                  regex: ([^:]+)(?::\d+)?;(\d+)
+                  replacement: $$1:$$2
+                  target_label: __address__
+                - action: labelmap
+                  regex: __meta_kubernetes_pod_label_(.+)
+                - source_labels: [__meta_kubernetes_namespace]
+                  target_label: k8s_namespace_name
+                - source_labels: [__meta_kubernetes_pod_name]
+                  target_label: k8s_pod_name
+    processors:
+      batch: { timeout: 5s, send_batch_size: 1024 }
+      k8sattributes:
+        auth_type: serviceAccount
+        passthrough: false
+        extract:
+          metadata: [k8s.pod.name, k8s.namespace.name, k8s.deployment.name, k8s.node.name, k8s.container.name]
+      resourcedetection:
+        # eks/aks add k8s.cluster + cloud attributes; ec2/azure add region, instance, etc.
+        # Unmatched detectors are skipped, so this same config is safe on any cloud.
+        detectors: [env, eks, aks, ec2, azure, gcp, system, k8snode]
+        timeout: 5s
+        override: false
+      # Memory guard: if the collector eats >80% of its limit, it refuses new data
+      # until it drains. Prevents OOMKill on bursty traffic.
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 85
+        spike_limit_percentage: 25
+      # ------- SignalControl Edge (local filtering, saves storage) -------
+      # Drop high-volume kube-system health-check noise before it hits Pulse0.
+      filter/noise:
+        error_mode: ignore
+        logs:
+          log_record:
+            - 'IsMatch(body, "(?i)(health|readiness|liveness) ?check")'
+            - 'resource.attributes["k8s.namespace.name"] == "kube-system" and severity_number < 9'
+      # Keep every errored trace and 20% of successful ones. Dash0's SignalControl
+      # does the same thing with its tail-sampler. Tune in values.yaml.
+      tail_sampling:
+        decision_wait: 10s
+        policies:
+          - { name: errors, type: status_code, status_code: { status_codes: [ERROR] } }
+          - { name: slow,   type: latency,     latency: { threshold_ms: 1000 } }
+          - { name: sample, type: probabilistic, probabilistic: { sampling_percentage: {{ .Values.collector.traceSamplingPercent | default 20 }} } }
+    exporters:
+      otlphttp/pulse0:
+        endpoint: http://{{ include "pulse0.fullname" . }}:{{ .Values.service.port }}
+        {{- if eq .Values.mode "hosted" }}
+        headers:
+          x-pulse0-key: "${env:PULSE0_INGEST_KEY}"
+        {{- else if .Values.auth.token }}
+        headers:
+          Authorization: "Bearer ${env:PULSE0_TOKEN}"
+        {{- end }}
+        retry_on_failure: { enabled: true, initial_interval: 1s, max_interval: 30s }
+        sending_queue:   { enabled: true, num_consumers: 4, queue_size: 5000 }
+    service:
+      pipelines:
+        traces:  { receivers: [otlp],
+                   processors: [memory_limiter, k8sattributes, resourcedetection, tail_sampling, batch],
+                   exporters: [otlphttp/pulse0] }
+        metrics: { receivers: [otlp, hostmetrics, kubeletstats, prometheus],
+                   processors: [memory_limiter, k8sattributes, resourcedetection, batch],
+                   exporters: [otlphttp/pulse0] }
+        logs:    { receivers: [otlp, filelog],
+                   processors: [memory_limiter, filter/noise, k8sattributes, resourcedetection, batch],
+                   exporters: [otlphttp/pulse0] }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "pulse0.fullname" . }}-collector
+  labels: {{- include "pulse0.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "pulse0.fullname" . }}-collector
+rules:
+  - apiGroups: [""]
+    resources: [pods, nodes, nodes/stats, nodes/proxy, nodes/metrics, namespaces, services, endpoints, replicationcontrollers, resourcequotas, events, configmaps]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, daemonsets, statefulsets, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  # The k8s_cluster receiver also watches HPAs; without this its cache never syncs and
+  # the collector terminates itself after the 10 minute initial-sync timeout.
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch]
+  # For Prometheus pod/service scraping discovery
+  - apiGroups: [""]
+    resources: [services/proxy, pods/proxy]
+    verbs: [get, list]
+  - nonResourceURLs: [/metrics]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "pulse0.fullname" . }}-collector
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ include "pulse0.fullname" . }}-collector }
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "pulse0.fullname" . }}-collector
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "pulse0.fullname" . }}-collector
+  labels: {{- include "pulse0.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: collector
+      {{- include "pulse0.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: collector
+        {{- include "pulse0.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "pulse0.fullname" . }}-collector
+      containers:
+        - name: otelcol
+          image: {{ .Values.collector.image }}
+          args: ["--config=/etc/otel/config.yaml"]
+          env:
+            - name: K8S_NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+            {{- if eq .Values.mode "hosted" }}
+            - name: PULSE0_INGEST_KEY
+              valueFrom: { secretKeyRef: { name: {{ required "hosted.collectorKeySecret is required when mode=hosted and collector.enabled=true (or set collector.enabled=false)" .Values.hosted.collectorKeySecret }}, key: {{ .Values.hosted.collectorKeyKey }} } }
+            {{- else if .Values.auth.token }}
+            - name: PULSE0_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ include "pulse0.fullname" . }}-auth, key: token } }
+            {{- end }}
+          ports:
+            - { name: otlp-grpc, containerPort: 4317 }
+            - { name: otlp-http, containerPort: 4319 }
+          volumeMounts:
+            - { name: config, mountPath: /etc/otel }
+            - { name: varlog, mountPath: /var/log, readOnly: true }
+          resources: {{- toYaml .Values.collector.resources | nindent 12 }}
+      volumes:
+        - { name: config, configMap: { name: {{ include "pulse0.fullname" . }}-collector } }
+        - { name: varlog, hostPath: { path: /var/log } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pulse0.fullname" . }}-collector
+  labels: {{- include "pulse0.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/component: collector
+    {{- include "pulse0.selectorLabels" . | nindent 4 }}
+  ports:
+    - { name: otlp-grpc, port: 4317, targetPort: otlp-grpc }
+    - { name: otlp-http, port: 4319, targetPort: otlp-http }
+{{- if .Values.collector.clusterMetrics.enabled }}
+---
+# Cluster-wide metrics (k8s_cluster receiver) must run ONCE per cluster. Running it in
+# the per-node DaemonSet reports every cluster metric once per node.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pulse0.fullname" . }}-cluster-collector
+  labels: {{- include "pulse0.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    receivers:
+      k8s_cluster:
+        auth_type: serviceAccount
+        collection_interval: 30s
+    processors:
+      batch: { timeout: 5s, send_batch_size: 1024 }
+      memory_limiter: { check_interval: 1s, limit_percentage: 85, spike_limit_percentage: 25 }
+      resourcedetection:
+        detectors: [env, eks, aks, ec2, azure, gcp, system]
+        timeout: 5s
+        override: false
+    exporters:
+      otlphttp/pulse0:
+        endpoint: http://{{ include "pulse0.fullname" . }}:{{ .Values.service.port }}
+        {{- if eq .Values.mode "hosted" }}
+        headers:
+          x-pulse0-key: "${env:PULSE0_INGEST_KEY}"
+        {{- else if .Values.auth.token }}
+        headers:
+          Authorization: "Bearer ${env:PULSE0_TOKEN}"
+        {{- end }}
+        retry_on_failure: { enabled: true, initial_interval: 1s, max_interval: 30s }
+    service:
+      pipelines:
+        metrics: { receivers: [k8s_cluster], processors: [memory_limiter, resourcedetection, batch], exporters: [otlphttp/pulse0] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "pulse0.fullname" . }}-cluster-collector
+  labels: {{- include "pulse0.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: cluster-collector
+      {{- include "pulse0.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: cluster-collector
+        {{- include "pulse0.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "pulse0.fullname" . }}-collector
+      containers:
+        - name: otelcol
+          image: {{ .Values.collector.image }}
+          args: ["--config=/etc/otel/config.yaml"]
+          {{- if eq .Values.mode "hosted" }}
+          env:
+            - name: PULSE0_INGEST_KEY
+              valueFrom: { secretKeyRef: { name: {{ required "hosted.collectorKeySecret is required when mode=hosted and collector.enabled=true (or set collector.enabled=false)" .Values.hosted.collectorKeySecret }}, key: {{ .Values.hosted.collectorKeyKey }} } }
+          {{- else if .Values.auth.token }}
+          env:
+            - name: PULSE0_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ include "pulse0.fullname" . }}-auth, key: token } }
+          {{- end }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/otel }
+          resources: {{- toYaml .Values.collector.resources | nindent 12 }}
+      volumes:
+        - { name: config, configMap: { name: {{ include "pulse0.fullname" . }}-cluster-collector } }
+{{- end }}
+{{- end }}

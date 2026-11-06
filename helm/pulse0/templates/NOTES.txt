@@ -1,0 +1,46 @@
+Pulse0 is installed!  Mode: {{ .Values.mode }}
+{{- if eq .Values.mode "hosted" }}
+
+HOSTED MODE: create your first organization with the platform admin token, then hand its admin key to the customer:
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "pulse0.fullname" . }} 4318:4318 &
+   ADMIN=$(kubectl -n {{ .Release.Namespace }} get secret {{ .Values.hosted.adminTokenSecret }} -o jsonpath='{.data.{{ .Values.hosted.adminTokenKey }}}' | base64 -d)
+   curl -s -X POST localhost:4318/admin/orgs -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d '{"name":"acme","daily_cap":5000000,"retention_hours":72}'
+   The response contains the organization's admin key once (stored hashed afterwards). Customers sign in with it in the UI.
+   Self-hosted data stays in your cluster; in hosted mode tenants' data lives on this volume, so back it up (see STORAGE-AND-COST.md).
+{{- end }}
+
+1. Access the UI:
+{{- if .Values.ingress.enabled }}
+   {{- range .Values.ingress.hosts }}
+   http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+   {{- end }}
+{{- else if contains "NodePort" .Values.service.type }}
+   kubectl get svc {{ include "pulse0.fullname" . }} -n {{ .Release.Namespace }}
+{{- else if contains "LoadBalancer" .Values.service.type }}
+   kubectl get svc {{ include "pulse0.fullname" . }} -n {{ .Release.Namespace }} -w
+{{- else }}
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "pulse0.fullname" . }} 4318:4318
+   open http://localhost:4318
+{{- end }}
+
+2. Send OpenTelemetry data:
+   Cluster-local endpoint:
+     http://{{ include "pulse0.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:4318
+
+{{- if .Values.collector.enabled }}
+
+3. The bundled OpenTelemetry Collector DaemonSet is already forwarding:
+   - Container logs (from /var/log/pods)
+   - Node and Kubernetes cluster metrics
+   - Any OTLP traffic sent to it on :4317 (gRPC) / :4319 (HTTP)
+
+   Point your apps at:
+     OTEL_EXPORTER_OTLP_ENDPOINT=http://{{ include "pulse0.fullname" . }}-collector.{{ .Release.Namespace }}.svc.cluster.local:4319
+{{- end }}
+
+{{- if .Values.ai.enabled }}
+
+4. Claude assistant: create the API-key secret once (never put the key in values files), then restart:
+   kubectl -n {{ .Release.Namespace }} create secret generic {{ .Values.ai.existingSecret }} --from-literal={{ .Values.ai.secretKey }}=<YOUR_ANTHROPIC_API_KEY>
+   kubectl -n {{ .Release.Namespace }} rollout restart statefulset/{{ include "pulse0.fullname" . }}
+{{- end }}
