@@ -118,6 +118,16 @@ async def test_request_id_header():
     assert len(r.headers.get("x-request-id", "")) == 12
 
 
+@pytest.mark.anyio
+async def test_container_logs_without_service_name_use_container_name():
+    res = {"attributes": [_kv("k8s.container.name", "filelog-box")]}
+    body = {"resourceLogs": [{"resource": res, "scopeLogs": [{"logRecords": [
+        {"timeUnixNano": str(time.time_ns()), "body": {"stringValue": "from a pod log file"}}]}]}]}
+    assert (await client.post("/v1/logs", json=body)).status_code == 200
+    rows = (await client.get("/api/logs", params={"q": "from a pod log file"})).json()
+    assert rows and rows[0]["service"] == "filelog-box"
+
+
 # ---------- ingest validation
 @pytest.mark.anyio
 async def test_otlp_rejects_malformed():

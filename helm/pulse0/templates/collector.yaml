@@ -24,6 +24,7 @@ data:
         # Never ingest the collector's own logs (feedback loop and unparseable stack traces).
         exclude: [ /var/log/pods/*/otelcol/*.log ]
         start_at: end
+        include_file_path: true
         operators:
           - type: container
             id: container-parser

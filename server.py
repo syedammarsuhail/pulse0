@@ -210,6 +210,8 @@ def ingest_logs(d):
     rows = []
     for rl in d.get("resourceLogs", []):
         svc, res = _res(rl)
+        if svc == "unknown" and res.get("k8s.container.name"):
+            svc = res["k8s.container.name"]  # filelog container logs carry no service.name
         rj = json.dumps(res)
         for sl in rl.get("scopeLogs", []):
             for l in sl.get("logRecords", []):

@@ -65,7 +65,7 @@ try {
     $zip = Join-Path $env:TEMP "pulse0-src.zip"
     Remove-Item $zip -ErrorAction SilentlyContinue
     # tar (bsdtar) writes forward-slash zip paths; Compress-Archive on PS 5.1 does not
-    Run tar -a -c -f $zip -C $tmp Dockerfile server.py static demo
+    Run (Join-Path $env:SystemRoot "System32\tar.exe") -a -c -f $zip -C $tmp Dockerfile server.py static demo
     Run aws s3 cp $zip "s3://$Bucket/src.zip" --region $Region --only-show-errors
 
     $trust = Join-Path $tmp "trust.json"
