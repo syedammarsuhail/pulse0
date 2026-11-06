@@ -19,6 +19,17 @@ from typing import Optional, Literal
 import uuid
 
 DB_PATH = os.environ.get("PULSE0_DB", os.path.join(os.path.dirname(__file__), "pulse0.db"))
+DATABASE_URL = os.environ.get("PULSE0_DATABASE_URL", "")
+USE_PG = bool(DATABASE_URL)
+PG_SCHEMA = os.environ.get("PULSE0_PG_SCHEMA", "pulse0")
+
+if USE_PG:
+    import psycopg
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+    _IntegrityError = (sqlite3.IntegrityError, psycopg.errors.UniqueViolation)
+else:
+    _IntegrityError = sqlite3.IntegrityError
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 RETENTION_HOURS = float(os.environ.get("PULSE0_RETENTION_HOURS", "72"))
 AUTH_TOKEN = os.environ.get("PULSE0_TOKEN", "")  # optional bearer token for ingest + API
@@ -34,6 +45,69 @@ ADMIN_TOKEN = os.environ.get("PULSE0_ADMIN_TOKEN", "")  # bootstrap platform adm
 DATA_DIR = os.environ.get("PULSE0_DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "tenants"))
 if HOSTED and not ADMIN_TOKEN:
     raise RuntimeError("PULSE0_ADMIN_TOKEN is required when PULSE0_MODE=hosted")
+
+def _jload(v):
+    """json.loads that passes through dicts (Postgres JSONB returns dicts directly)."""
+    return v if isinstance(v, (dict, list)) else json.loads(v or "{}")
+
+
+# ---------------------------------------------------------------- Postgres SQL translation
+_PG_TABLES = ("spans", "logs", "metrics", "alert_rules", "alert_events",
+              "synthetics", "synthetic_runs", "dashboards", "audit", "slos")
+
+def _pg_sql(sql):
+    """Translate SQLite-flavoured SQL to Postgres dialect."""
+    if not USE_PG:
+        return sql
+    # Parameter placeholders: ? -> %s (but not inside strings)
+    out, i, in_str = [], 0, False
+    while i < len(sql):
+        ch = sql[i]
+        if ch == "'" and (i == 0 or sql[i-1] != "'"):
+            in_str = not in_str
+            out.append(ch)
+        elif ch == '?' and not in_str:
+            out.append('%s')
+        else:
+            out.append(ch)
+        i += 1
+    sql = ''.join(out)
+
+    # Schema-qualify table names
+    for t in _PG_TABLES:
+        sql = re.sub(r'\b(FROM|JOIN|INTO|UPDATE|TABLE)\s+' + t + r'\b',
+                      lambda m: m.group(1) + ' ' + PG_SCHEMA + '.' + t, sql, flags=re.IGNORECASE)
+        sql = re.sub(r'\bINSERT\s+INTO\s+' + PG_SCHEMA + r'\.' + t + r'\s+VALUES',
+                      'INSERT INTO ' + PG_SCHEMA + '.' + t + ' VALUES', sql, flags=re.IGNORECASE)
+        # ON ... table(col) references in indexes
+        sql = re.sub(r'\bON\s+' + t + r'\(', 'ON ' + PG_SCHEMA + '.' + t + '(', sql, flags=re.IGNORECASE)
+
+    # json_extract(col, '$."key"') -> col->>'key'  and  json_extract(col, '$.key') -> col->>'key'
+    def _jx(m):
+        col, key = m.group(1), m.group(2)
+        key = key.strip('"')
+        return f"{col}->>'{key}'"
+    sql = re.sub(r'''json_extract\(\s*(\w+)\s*,\s*'\$\.["']?([^'"]+)["']?'\s*\)''', _jx, sql)
+
+    # CAST(col->>'key' AS TEXT) -> col->>'key'  (already text in Postgres)
+    sql = re.sub(r"CAST\(\s*([\w.]+->>'[^']+')\s+AS\s+TEXT\)", r'\1', sql, flags=re.IGNORECASE)
+
+    # SUM(expr=val) -> SUM((expr=val)::int)  — Postgres boolean not summable
+    sql = re.sub(r"SUM\(([^()]+?=\s*[^()]+?)\)", r'SUM((\1)::int)', sql)
+    # SUM((ts_ns>=%s)::int) is fine but SUM(ts_ns>=%s) needs the same treatment
+    sql = re.sub(r"SUM\(([^()]+?>=\s*[^()]+?)\)", r'SUM((\1)::int)', sql)
+    # Fix double-casting: SUM(((expr)::int)::int) -> SUM((expr)::int)
+    sql = re.sub(r"\(\(([^()]+)\)::int\)::int", r'(\1)::int', sql)
+
+    # (parent_id<>'') needs no translation, it works in both
+
+    # ORDER BY (parent_id<>'') -> ORDER BY (parent_id<>'')::int  (Postgres can't sort boolean directly
+    # in the same way SQLite sorts 0/1, but actually Postgres CAN order by boolean: false < true)
+    # So this is fine.
+
+    return sql
+
+
 
 _SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -84,8 +158,15 @@ def _open_db(path):
     return c
 
 
+# ---- Postgres pool (when USE_PG) ----
+_pg_pool = None
+if USE_PG:
+    _pg_pool = ConnectionPool(DATABASE_URL, min_size=2, max_size=10, open=True,
+                              kwargs={"options": f"-c search_path={PG_SCHEMA},public"})
+
+# ---- SQLite single-tenant (when not USE_PG) ----
 _lock = threading.Lock()
-_conn = _open_db(DB_PATH)
+_conn = None if USE_PG else _open_db(DB_PATH)
 
 # Which SQLite silo the current request / worker iteration reads and writes. None = the default
 # (self-hosted) database. The hosted-mode auth middleware sets this from the API key's project, so
@@ -110,12 +191,29 @@ def _handle():
         return h
 
 
+class _PgCursor:
+    """Thin wrapper so pg cursors quack like sqlite3 cursors for our helpers."""
+    def __init__(self, conn):
+        self._conn = conn
+    def execute(self, sql, args=()):
+        return self._conn.execute(_pg_sql(sql), args)
+    def executemany(self, sql, rows):
+        cur = self._conn.cursor()
+        cur.executemany(_pg_sql(sql), rows)
+        return cur
+
+
 @contextmanager
 def db():
-    conn, lock = _handle()
-    with lock:
-        yield conn
-        conn.commit()
+    if USE_PG:
+        with _pg_pool.connection() as conn:
+            yield _PgCursor(conn)
+            conn.commit()
+    else:
+        conn, lock = _handle()
+        with lock:
+            yield conn
+            conn.commit()
 
 
 _readers = threading.local()
@@ -134,6 +232,9 @@ def _reader():
 
 def qrows(sql, args=()):
     """Raw row tuples (no dict conversion) for large scans aggregated by the caller."""
+    if USE_PG:
+        with _pg_pool.connection() as conn:
+            return conn.execute(_pg_sql(sql), args).fetchall()
     if _cur_db.get() is None:
         return _reader().execute(sql, args).fetchall()
     conn, lock = _handle()
@@ -143,6 +244,9 @@ def qrows(sql, args=()):
 
 def qcol(sql, args=()):
     """First column of every row as a plain list (no per-row dicts: much cheaper for big scans)."""
+    if USE_PG:
+        with _pg_pool.connection() as conn:
+            return [r[0] for r in conn.execute(_pg_sql(sql), args)]
     if _cur_db.get() is None:
         return [r[0] for r in _reader().execute(sql, args)]
     conn, lock = _handle()
@@ -197,6 +301,10 @@ def ttl_cached(fn):
 
 
 def q(sql, args=()):
+    if USE_PG:
+        with _pg_pool.connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                return cur.execute(_pg_sql(sql), args).fetchall()
     if _cur_db.get() is None and sql.lstrip().upper().startswith(("SELECT", "WITH")):
         return [dict(r) for r in _reader().execute(sql, args).fetchall()]
     conn, lock = _handle()
@@ -284,7 +392,7 @@ def ingest_traces(d):
                              if isinstance(status.get("code", 0), str) else status.get("code", 0),
                              status.get("message", ""), json.dumps(_kv(s.get("attributes"))), rj))
     with db() as c:
-        c.executemany("INSERT INTO spans VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+        c.executemany("INSERT INTO spans(trace_id,span_id,parent_id,service,name,kind,start_ns,end_ns,dur_ms,status,status_msg,attrs,res) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     return len(rows)
 
 
@@ -308,7 +416,7 @@ def ingest_logs(d):
                              l.get("severityText", ""), body if isinstance(body, str) else json.dumps(body),
                              l.get("traceId", ""), l.get("spanId", ""), json.dumps(_kv(l.get("attributes"))), rj))
     with db() as c:
-        c.executemany("INSERT INTO logs VALUES(?,?,?,?,?,?,?,?,?)", rows)
+        c.executemany("INSERT INTO logs(ts_ns,service,severity,sev_text,body,trace_id,span_id,attrs,res) VALUES(?,?,?,?,?,?,?,?,?)", rows)
     return len(rows)
 
 
@@ -333,7 +441,7 @@ def ingest_metrics(d):
                         rows.append((_ns(p.get("timeUnixNano")) or time.time_ns(), svc, name, unit, mtype, val,
                                      json.dumps(_kv(p.get("attributes"))), rj))
     with db() as c:
-        c.executemany("INSERT INTO metrics VALUES(?,?,?,?,?,?,?,?)", rows)
+        c.executemany("INSERT INTO metrics(ts_ns,service,name,unit,mtype,value,attrs,res) VALUES(?,?,?,?,?,?,?,?)", rows)
     return len(rows)
 
 
@@ -549,7 +657,7 @@ def _identify(request):
 def _audit(ident, method, path, status, detail=""):
     try:
         with db() as c:
-            c.execute("INSERT INTO audit VALUES(?,?,?,?,?,?,?,?)",
+            c.execute("INSERT INTO audit(ts,actor,role,via,method,path,status,detail) VALUES(?,?,?,?,?,?,?,?)",
                       (time.time_ns(), ident["actor"], ident["role"], ident["via"], method, path, int(status), detail[:300]))
     except Exception as e:
         print("audit error:", e)
@@ -720,7 +828,7 @@ def resource_attrs(svc: str):
     for t in ("spans", "logs", "metrics"):
         r = q(f"SELECT res FROM {t} WHERE service=? LIMIT 1", (svc,))
         if r:
-            return json.loads(r[0]["res"])
+            return _jload(r[0]["res"])
     return {}
 
 
@@ -744,12 +852,12 @@ def service_map(minutes: float = 60):
     # Use explicit semantic attributes only (peer.service / db.system / messaging.system);
     # we deliberately skip raw server.address so we don't create noisy bare-IP nodes
     # that duplicate an already-instrumented service.
-    ext = q("""SELECT service src,
-                      COALESCE(json_extract(attrs,'$."peer.service"'),
+    _dst_expr = """COALESCE(json_extract(attrs,'$."peer.service"'),
                                json_extract(attrs,'$."db.system"'),
-                               json_extract(attrs,'$."messaging.system"')) dst,
+                               json_extract(attrs,'$."messaging.system"'))"""
+    ext = q(f"""SELECT service src, {_dst_expr} dst,
                       COUNT(*) calls, SUM(status=2) err, AVG(dur_ms) avg_ms
-               FROM spans WHERE kind=3 AND start_ns>=? GROUP BY src,dst HAVING dst IS NOT NULL""", (t0,))
+               FROM spans WHERE kind=3 AND start_ns>=? GROUP BY src,dst HAVING {_dst_expr} IS NOT NULL""", (t0,))
     svc_names = {s["service"] for s in q("SELECT DISTINCT service FROM spans")}
     seen = {(e["src"], e["dst"]) for e in edges}
     for e in ext:
@@ -769,7 +877,7 @@ def map_nodes(minutes: float = 60):
     out = []
     for r in q("SELECT service, MIN(res) res FROM spans WHERE start_ns>=? GROUP BY service", (t0,)):
         try:
-            a = json.loads(r["res"] or "{}")
+            a = _jload(r["res"])
         except ValueError:
             a = {}
         a = a.get("attributes", a) if isinstance(a, dict) else {}
@@ -815,7 +923,7 @@ def trace(trace_id: str):
     if not spans:
         raise HTTPException(404, "trace not found")
     for s in spans:
-        s["attrs"] = json.loads(s["attrs"])
+        s["attrs"] = _jload(s["attrs"])
         s.pop("res", None)
     logs = q("SELECT ts_ns, service, sev_text, severity, body, span_id FROM logs WHERE trace_id=? ORDER BY ts_ns", (trace_id,))
     return {"spans": spans, "logs": logs}
@@ -843,7 +951,7 @@ def logs(minutes: float = 60, service: str = "", min_severity: int = 0, q_: str 
                 where.append("body LIKE ?"); args.append(f"%{tok}%")
     rows = q(f"SELECT * FROM logs WHERE {' AND '.join(where)} ORDER BY ts_ns DESC LIMIT ?", (*args, limit))
     for r in rows:
-        r["attrs"] = json.loads(r["attrs"]); r.pop("res", None)
+        r["attrs"] = _jload(r["attrs"]); r.pop("res", None)
     return rows
 
 
@@ -957,7 +1065,7 @@ async def slo_create(body: SloIn):
         with db() as c:
             c.execute("INSERT INTO slos(name,service,objective_pct,latency_ms,window_days) VALUES(?,?,?,?,?)",
                       (body.name, body.service, body.objective_pct, body.latency_ms, body.window_days))
-    except sqlite3.IntegrityError:
+    except _IntegrityError:
         raise HTTPException(409, f"SLO named '{body.name}' already exists")
     return {"ok": True}
 
@@ -1102,7 +1210,7 @@ def run_check(ch):
     blocked = _blocked_dest(ch["url"])
     if blocked:
         with db() as c:
-            c.execute("INSERT INTO synthetic_runs VALUES(?,?,?,?,?,?,?)", (ch["id"], int(time.time()), 0, 0, 0.0, None, blocked))
+            c.execute("INSERT INTO synthetic_runs(check_id,ts,ok,status,ms,ssl_days,err) VALUES(?,?,?,?,?,?,?)", (ch["id"], int(time.time()), 0, 0, 0.0, None, blocked))
         return
     try:
         req = urllib.request.Request(ch["url"], headers={"User-Agent": "Pulse0-Synthetic/1.0"})
@@ -1128,7 +1236,7 @@ def run_check(ch):
         except Exception:
             pass
     with db() as c:
-        c.execute("INSERT INTO synthetic_runs VALUES(?,?,?,?,?,?,?)", (ch["id"], int(time.time()), ok, status, ms, ssl_days, err))
+        c.execute("INSERT INTO synthetic_runs(check_id,ts,ok,status,ms,ssl_days,err) VALUES(?,?,?,?,?,?,?)", (ch["id"], int(time.time()), ok, status, ms, ssl_days, err))
 
 
 @app.get("/api/synthetics")
@@ -1357,7 +1465,7 @@ def investigate(q_: str = "", minutes: float = 60):
         bad = [s for s in svcs if s["err"] > 0]
         for s in sorted(bad, key=lambda s: -s["err_pct"])[:5]:
             op = q("""SELECT name, COUNT(*) n, SUM(status=2) e FROM spans WHERE service=? AND start_ns>=? AND kind IN (2,5)
-                      GROUP BY name HAVING e>0 ORDER BY e DESC LIMIT 1""", (s["service"], since_ns(minutes)))
+                      GROUP BY name HAVING SUM(status=2)>0 ORDER BY e DESC LIMIT 1""", (s["service"], since_ns(minutes)))
             msg = q("""SELECT substr(body,1,140) b FROM logs WHERE service=? AND ts_ns>=? AND severity>=17
                        GROUP BY b ORDER BY COUNT(*) DESC LIMIT 1""", (s["service"], since_ns(minutes)))
             val = f"{s['err_pct']:.1f}% errors ({s['err']}/{s['n']})"
@@ -1934,7 +2042,7 @@ def _create_project(org_id, name):
     pid = _new_id("prj")
     try:
         pexec("INSERT INTO projects(id,org_id,name,created) VALUES(?,?,?,?)", (pid, org_id, name, int(time.time())))
-    except sqlite3.IntegrityError:
+    except _IntegrityError:
         raise HTTPException(409, f"project '{name}' already exists in this organization")
     _open_db(_project_path(pid)).close()  # create the silo eagerly
     return {"id": pid, "name": name, "org_id": org_id}
@@ -2039,7 +2147,7 @@ def admin_org_create(body: OrgIn):
     try:
         pexec("INSERT INTO orgs(id,name,created,daily_cap,retention_hours) VALUES(?,?,?,?,?)",
               (oid, body.name, int(time.time()), body.daily_cap or None, body.retention_hours))
-    except sqlite3.IntegrityError:
+    except _IntegrityError:
         raise HTTPException(409, f"organization '{body.name}' already exists")
     out = {"id": oid, "name": body.name, "daily_cap": body.daily_cap, "retention_hours": body.retention_hours}
     if body.with_admin_key:
@@ -2068,7 +2176,7 @@ def admin_org_patch(org_id: str, body: OrgPatch):
             pexec("UPDATE orgs SET daily_cap=? WHERE id=?", (body.daily_cap or None, org_id))
         if body.retention_hours is not None:
             pexec("UPDATE orgs SET retention_hours=? WHERE id=?", (body.retention_hours, org_id))
-    except sqlite3.IntegrityError:
+    except _IntegrityError:
         raise HTTPException(409, "organization name already exists")
     return _org_usage(org_id)["org"]
 

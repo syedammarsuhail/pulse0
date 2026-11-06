@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 WORKDIR /app
-RUN pip install --no-cache-dir fastapi uvicorn opentelemetry-proto protobuf "anthropic>=0.34"
+RUN pip install --no-cache-dir fastapi uvicorn opentelemetry-proto protobuf "anthropic>=0.34" "psycopg[binary]>=3.1" "psycopg_pool>=3.1"
 COPY server.py /app/server.py
 COPY static /app/static
 ENV PULSE0_HOST=0.0.0.0 PULSE0_PORT=4318

@@ -4,3 +4,5 @@ opentelemetry-proto>=1.25
 protobuf>=4.25
 pydantic>=2.0
 anthropic>=0.34
+psycopg[binary]>=3.1
+psycopg_pool>=3.1

@@ -21,10 +21,21 @@ ingress:
   tls: []
 
 persistence:
-  enabled: true
+  enabled: true      # disable when using an external database (postgres.enabled)
   size: 10Gi
   storageClass: ""
   accessMode: ReadWriteOnce
+
+# External Postgres database (Supabase, RDS, etc.). When enabled, all telemetry and metadata go to
+# Postgres instead of local SQLite. Disable persistence above to skip the PVC entirely.
+postgres:
+  enabled: false
+  # Existing Secret holding the full connection string in the named key:
+  #   kubectl -n observability create secret generic pulse0-db \
+  #     --from-literal=database-url='postgresql://user:pass@host:5432/db?sslmode=require'
+  existingSecret: ""
+  secretKey: database-url
+  schema: pulse0      # Postgres schema for all Pulse0 tables (created automatically)
 
 auth:
   # Optional bearer token enforced on /v1/* and /api/*.
