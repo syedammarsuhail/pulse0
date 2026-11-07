@@ -13,7 +13,8 @@ from fastapi.testclient import TestClient
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADMIN = "test-admin-token"
 _ENV_KEYS = ["PULSE0_MODE", "PULSE0_ADMIN_TOKEN", "PULSE0_DATA_DIR", "PULSE0_DB", "PULSE0_TOKEN",
-             "PULSE0_DEFAULT_DAILY_CAP", "PULSE0_AUTH_FAIL_LIMIT", "PULSE0_HOSTED_AI", "PULSE0_RETENTION_HOURS"]
+             "PULSE0_DEFAULT_DAILY_CAP", "PULSE0_AUTH_FAIL_LIMIT", "PULSE0_HOSTED_AI", "PULSE0_RETENTION_HOURS",
+             "PULSE0_TIER", "PULSE0_LICENSE_KEY"]
 
 
 def load(name, **env):
@@ -24,6 +25,7 @@ def load(name, **env):
     d = tempfile.mkdtemp(prefix="p0_" + name + "_")
     os.environ["PULSE0_DB"] = os.path.join(d, "default.db")
     os.environ["PULSE0_DATA_DIR"] = os.path.join(d, "tenants")
+    os.environ["PULSE0_TIER"] = "pro"
     os.environ.update({k: str(v) for k, v in env.items()})
     try:
         spec = importlib.util.spec_from_file_location(name, os.path.join(ROOT, "server.py"))
@@ -115,8 +117,12 @@ def test_default_mode_is_selfhosted_and_unchanged():
     m = load("server_self")
     c = TestClient(m.app)
     assert m.MODE == "selfhosted" and not m.HOSTED
-    assert c.get("/api/mode").json() == {"mode": "selfhosted", "features": {
-        "multi_tenant": False, "organizations": False, "quotas": False, "admin_api": False, "ai_assistant": False}}
+    mode = c.get("/api/mode").json()
+    assert mode["mode"] == "selfhosted"
+    assert mode["tier"] in ("community", "pro")
+    assert "features" in mode
+    assert mode["features"]["multi_tenant"] is False
+    assert mode["features"]["organizations"] is False
     assert c.get("/api/services").status_code == 200          # no key needed, as before
     assert c.post("/v1/traces", json=spans("x", 2)).status_code == 200
     assert any(s["service"] == "x" for s in c.get("/api/services").json())

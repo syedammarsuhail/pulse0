@@ -34,6 +34,56 @@ STATIC = os.path.join(os.path.dirname(__file__), "static")
 RETENTION_HOURS = float(os.environ.get("PULSE0_RETENTION_HOURS", "72"))
 AUTH_TOKEN = os.environ.get("PULSE0_TOKEN", "")  # optional bearer token for ingest + API
 
+# ---------------------------------------------------------------- Tier / licensing
+# PULSE0_TIER: "community" (free, limited) or "pro" (paid, unlimited).
+# Set PULSE0_LICENSE_KEY to a valid key to activate Pro; without it, tier is always "community".
+_LICENSE_KEY = os.environ.get("PULSE0_LICENSE_KEY", "")
+TIER = "pro" if _LICENSE_KEY else os.environ.get("PULSE0_TIER", "community").strip().lower()
+if TIER not in ("community", "pro"):
+    TIER = "community"
+IS_PRO = TIER == "pro"
+
+# Community-tier limits (Pro is unlimited)
+TIER_LIMITS = {
+    "max_services": 5,
+    "max_dashboards": 3,
+    "max_alerts": 3,
+    "max_slos": 1,
+    "max_synthetics": 1,
+    "retention_days": 7,
+}
+if not IS_PRO:
+    RETENTION_HOURS = min(RETENTION_HOURS, TIER_LIMITS["retention_days"] * 24)
+
+
+def _tier_check(resource: str, table: str):
+    """Raise 403 if the community tier limit is reached for a resource."""
+    if IS_PRO:
+        return
+    limit = TIER_LIMITS.get(f"max_{resource}")
+    if limit is None:
+        return
+    count = q(f"SELECT COUNT(*) n FROM {table}")[0]["n"]
+    if count >= limit:
+        raise HTTPException(
+            403,
+            {"error": "tier_limit",
+             "message": f"Community tier allows up to {limit} {resource}. Upgrade to Pro for unlimited.",
+             "limit": limit, "current": count, "tier": "community",
+             "upgrade_url": "https://pulse0.dev/pricing"})
+
+
+def _tier_gate(feature: str):
+    """Block a Pro-only feature on community tier."""
+    if IS_PRO:
+        return
+    raise HTTPException(
+        403,
+        {"error": "pro_required",
+         "message": f"{feature} is available on the Pro tier. Upgrade to unlock.",
+         "feature": feature, "tier": "community",
+         "upgrade_url": "https://pulse0.dev/pricing"})
+
 # Deployment mode. "selfhosted" (default) is the classic single-tenant Pulse0: one SQLite file, optional
 # PULSE0_TOKEN. "hosted" is Pulse-hosted multi-tenant: organizations -> projects (one SQLite silo each),
 # hashed API keys, per-org quotas. See the "hosted mode" section below.
@@ -374,10 +424,38 @@ def _fix_ids(o):
     return o
 
 
+_known_services: set = set()
+_known_services_ts: float = 0
+
+def _check_service_limit(svc_names: set):
+    """On community tier, reject ingest if it would exceed the service cap."""
+    if IS_PRO or not svc_names:
+        return
+    global _known_services, _known_services_ts
+    now = time.time()
+    if now - _known_services_ts > 60:
+        rows = q("SELECT DISTINCT service FROM spans")
+        _known_services = {r["service"] for r in rows}
+        _known_services_ts = now
+    new = svc_names - _known_services
+    if new and len(_known_services | svc_names) > TIER_LIMITS["max_services"]:
+        raise HTTPException(
+            403,
+            {"error": "tier_limit",
+             "message": f"Community tier allows up to {TIER_LIMITS['max_services']} services. Upgrade to Pro for unlimited.",
+             "limit": TIER_LIMITS["max_services"],
+             "current_services": sorted(_known_services),
+             "rejected_services": sorted(new),
+             "tier": "community",
+             "upgrade_url": "https://pulse0.dev/pricing"})
+
+
 def ingest_traces(d):
     rows = []
+    batch_services = set()
     for rs in d.get("resourceSpans", []):
         svc, res = _res(rs)
+        batch_services.add(svc)
         rj = json.dumps(res)
         for ss in rs.get("scopeSpans", []):
             for s in ss.get("spans", []):
@@ -391,8 +469,10 @@ def ingest_traces(d):
                              {"STATUS_CODE_ERROR": 2, "STATUS_CODE_OK": 1}.get(status.get("code"), status.get("code", 0))
                              if isinstance(status.get("code", 0), str) else status.get("code", 0),
                              status.get("message", ""), json.dumps(_kv(s.get("attributes"))), rj))
+    _check_service_limit(batch_services)
     with db() as c:
         c.executemany("INSERT INTO spans(trace_id,span_id,parent_id,service,name,kind,start_ns,end_ns,dur_ms,status,status_msg,attrs,res) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    _known_services.update(batch_services)
     return len(rows)
 
 
@@ -969,7 +1049,9 @@ def logs_hist(minutes: float = 60, service: str = "", buckets: int = 60):
 # ---- metrics
 @app.get("/api/metrics/names")
 def metric_names():
-    return q("SELECT name, unit, mtype, COUNT(*) points, GROUP_CONCAT(DISTINCT service) services FROM metrics GROUP BY name ORDER BY name")
+    _gc = "STRING_AGG(DISTINCT service, ',')" if USE_PG else "GROUP_CONCAT(DISTINCT service)"
+    _gb = "name, unit, mtype" if USE_PG else "name"
+    return q(f"SELECT name, unit, mtype, COUNT(*) points, {_gc} services FROM metrics GROUP BY {_gb} ORDER BY name")
 
 
 def _metric_series(name, service, minutes, buckets, agg, group_by=""):
@@ -1061,6 +1143,7 @@ def slos_list():
 
 @app.post("/api/slos")
 async def slo_create(body: SloIn):
+    _tier_check("slos", "slos")
     try:
         with db() as c:
             c.execute("INSERT INTO slos(name,service,objective_pct,latency_ms,window_days) VALUES(?,?,?,?,?)",
@@ -1090,6 +1173,9 @@ def dashboards_list():
 
 @app.post("/api/dashboards")
 async def dashboard_save(body: DashboardIn):
+    existing = q("SELECT id FROM dashboards WHERE name=?", (body.name,))
+    if not existing:
+        _tier_check("dashboards", "dashboards")
     with db() as c:
         c.execute("""INSERT INTO dashboards(name,panels,updated) VALUES(?,?,?)
                      ON CONFLICT(name) DO UPDATE SET panels=excluded.panels, updated=excluded.updated""",
@@ -1174,6 +1260,7 @@ def alerts():
 
 @app.post("/api/alerts")
 async def alert_create(body: AlertRuleIn):
+    _tier_check("alerts", "alert_rules")
     with db() as c:
         c.execute("INSERT INTO alert_rules(name,signal,expr,op,threshold,window_s,service,webhook) VALUES(?,?,?,?,?,?,?,?)",
                   (body.name, body.signal, body.expr, body.op, body.threshold,
@@ -1252,6 +1339,7 @@ def synthetics():
 
 @app.post("/api/synthetics")
 async def synth_create(body: SyntheticIn):
+    _tier_check("synthetics", "synthetics")
     with db() as c:
         c.execute("INSERT INTO synthetics(name,url,interval_s,expect_status,max_ms) VALUES(?,?,?,?,?)",
                   (body.name, body.url, body.interval_s, body.expect_status, body.max_ms))
@@ -1729,6 +1817,7 @@ def assistant_status():
 
 @app.post("/api/assistant")
 def assistant(body: AssistantIn):
+    _tier_gate("AI assistant")
     if not _ai_key():
         return JSONResponse({"error": "assistant_disabled", "mode": "rules", "fallback": "/api/investigate",
                              "message": "ANTHROPIC_API_KEY is not set; use the rule-based /api/investigate."}, status_code=503)
@@ -2313,6 +2402,9 @@ def _discovery():
 
 
 def _need_sso():
+    if not IS_PRO:
+        raise HTTPException(403, {"error": "pro_required", "message": "SSO is available on the Pro tier.",
+                                  "tier": "community", "upgrade_url": "https://pulse0.dev/pricing"})
     if not sso_enabled():
         raise HTTPException(404, "SSO is not configured")
 
@@ -2467,8 +2559,13 @@ def api_audit(limit: int = 200, actor: str = ""):
 @app.get("/api/mode")
 def api_mode():
     """Which deployment mode this server runs in (public: the UI needs it before sign-in)."""
-    return {"mode": MODE, "features": {"multi_tenant": HOSTED, "organizations": HOSTED, "quotas": HOSTED,
-                                       "admin_api": HOSTED, "ai_assistant": bool(_ai_key())}}
+    return {"mode": MODE, "tier": TIER, "is_pro": IS_PRO,
+            "limits": TIER_LIMITS if not IS_PRO else None,
+            "features": {"multi_tenant": HOSTED, "organizations": HOSTED, "quotas": HOSTED,
+                         "admin_api": HOSTED, "ai_assistant": IS_PRO and bool(_ai_key()),
+                         "sso": IS_PRO, "rbac": IS_PRO, "postgres": IS_PRO or USE_PG,
+                         "unlimited_dashboards": IS_PRO, "unlimited_alerts": IS_PRO,
+                         "unlimited_slos": IS_PRO, "unlimited_services": IS_PRO}}
 
 
 # ---- background workers

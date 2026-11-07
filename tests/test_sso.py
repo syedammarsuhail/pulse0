@@ -5,6 +5,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 os.environ.setdefault("PULSE0_CACHE_TTL", "0")
+os.environ.setdefault("PULSE0_TIER", "pro")
 os.environ.setdefault("PULSE0_DB", "/tmp/pulse0_test.db")
 
 import server  # noqa: E402

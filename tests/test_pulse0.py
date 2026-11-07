@@ -22,6 +22,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 os.environ["PULSE0_CACHE_TTL"] = "0"  # tests read their own writes immediately
+os.environ["PULSE0_TIER"] = "pro"  # tests need unlimited resources
 os.environ["PULSE0_DB"] = "/tmp/pulse0_test.db"
 if os.path.exists("/tmp/pulse0_test.db"):
     os.remove("/tmp/pulse0_test.db")
