@@ -270,6 +270,23 @@ if USE_PG:
     _pg_pool = ConnectionPool(DATABASE_URL, min_size=2, max_size=10, open=True,
                               kwargs={"options": f"-c search_path={PG_SCHEMA},public"})
 
+
+def _pg_ddl():
+    """The SQLite schema above, translated to Postgres types."""
+    ddl = "\n".join(ln for ln in _SCHEMA.splitlines() if not ln.startswith("PRAGMA"))
+    ddl = ddl.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+    ddl = re.sub(r"\bINTEGER\b", "BIGINT", ddl)
+    ddl = re.sub(r"\bREAL\b", "DOUBLE PRECISION", ddl)
+    return re.sub(r"\b(attrs|res) TEXT", r"\1 JSONB", ddl)
+
+
+if USE_PG:
+    if not PG_SCHEMA.isidentifier():
+        raise RuntimeError("PULSE0_PG_SCHEMA must be a plain identifier")
+    with _pg_pool.connection() as _c:
+        _c.execute(f'CREATE SCHEMA IF NOT EXISTS "{PG_SCHEMA}"')
+        _c.execute(_pg_ddl())
+
 # ---- SQLite single-tenant (when not USE_PG) ----
 _lock = threading.Lock()
 _conn = None if USE_PG else _open_db(DB_PATH)

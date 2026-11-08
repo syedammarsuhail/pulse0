@@ -785,3 +785,13 @@ def test_pg_sql_translation(monkeypatch):
     assert "jsonb_path_query_first(attrs, %s::jsonpath)" in out and out.count("%s") == 2
     out = server._pg_sql("SELECT CAST(json_extract(attrs, ?) AS TEXT)=? FROM logs")
     assert "json_extract" not in out
+
+
+def test_pg_ddl_translation():
+    ddl = server._pg_ddl()
+    assert "PRAGMA" not in ddl and "AUTOINCREMENT" not in ddl
+    assert "start_ns BIGINT" in ddl and "dur_ms DOUBLE PRECISION" in ddl
+    assert "attrs JSONB, res JSONB" in ddl
+    assert "id BIGSERIAL PRIMARY KEY" in ddl
+    assert "panels TEXT" in ddl  # dashboards keep panels as text
+    assert ddl.count("CREATE TABLE") == 10
