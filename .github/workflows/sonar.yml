@@ -42,8 +42,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: >
-            -Dsonar.organization=${{ github.repository_owner }}
-            -Dsonar.projectKey=${{ github.repository_owner }}_pulse0
+            -Dsonar.organization=syedammarsuhail-1
+            -Dsonar.projectKey=syedammarsuhail_pulse0
             -Dsonar.sources=server.py,static/,enterprise/
             -Dsonar.tests=tests/
             -Dsonar.python.coverage.reportPaths=coverage.xml
