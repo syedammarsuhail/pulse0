@@ -9,7 +9,7 @@ import collections, contextvars, hashlib, hmac, ipaddress, re, secrets
 from contextlib import contextmanager
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, HTTPException, Depends, Query
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -196,9 +196,9 @@ def _pg_sql(sql):
     sql = re.sub(r"CAST\(\s*([\w.]+->>'[^']+')\s+AS\s+TEXT\)", r'\1', sql, flags=re.IGNORECASE)
 
     # SUM(expr=val) -> SUM((expr=val)::int)  — Postgres boolean not summable
-    sql = re.sub(r"SUM\(([^()]+?=\s*[^()]+?)\)", r'SUM((\1)::int)', sql)
+    sql = re.sub(r"SUM\(([^()=]+=[^()]+)\)", r'SUM((\1)::int)', sql)
     # SUM((ts_ns>=%s)::int) is fine but SUM(ts_ns>=%s) needs the same treatment
-    sql = re.sub(r"SUM\(([^()]+?>=\s*[^()]+?)\)", r'SUM((\1)::int)', sql)
+    sql = re.sub(r"SUM\(((?:[^()>]|>(?!=))+>=[^()]+)\)", r'SUM((\1)::int)', sql)
     # Fix double-casting: SUM(((expr)::int)::int) -> SUM((expr)::int)
     sql = re.sub(r"\(\(([^()]+)\)::int\)::int", r'(\1)::int', sql)
 
@@ -949,7 +949,7 @@ def services(minutes: float = 60):
 
 
 @app.get("/api/services/{svc}/timeseries")
-def service_ts(svc: str, minutes: float = 60, buckets: int = 60):
+def service_ts(svc: str, minutes: float = 60, buckets: int = Query(60, ge=1, le=1000)):
     t0 = since_ns(minutes)
     w = int(minutes * 60 * 1e9 / buckets)
     rows = q("""SELECT (start_ns-?)/? b, COUNT(*) n, SUM(status=2) err, AVG(dur_ms) avg_ms
@@ -1096,7 +1096,7 @@ def logs(minutes: float = 60, service: str = "", min_severity: int = 0, q_: str 
 
 
 @app.get("/api/logs/histogram")
-def logs_hist(minutes: float = 60, service: str = "", buckets: int = 60):
+def logs_hist(minutes: float = 60, service: str = "", buckets: int = Query(60, ge=1, le=1000)):
     t0 = since_ns(minutes); w = int(minutes * 60 * 1e9 / buckets)
     where, args = ["ts_ns>=?"], [t0]
     if service:
@@ -1135,7 +1135,7 @@ def _metric_series(name, service, minutes, buckets, agg, group_by=""):
 
 
 @app.get("/api/metrics/query")
-def metric_query(name: str, service: str = "", minutes: float = 60, buckets: int = 60, agg: str = "avg", group_by: str = ""):
+def metric_query(name: str, service: str = "", minutes: float = 60, buckets: int = Query(60, ge=1, le=1000), agg: str = "avg", group_by: str = ""):
     return _metric_series(name, service, minutes, buckets, agg, group_by)
 
 
@@ -1535,7 +1535,7 @@ def insights(minutes: float = 60):
 
 @app.get("/api/home")
 @ttl_cached
-def home(minutes: float = 60, buckets: int = 60):
+def home(minutes: float = 60, buckets: int = Query(60, ge=1, le=1000)):
     t0 = since_ns(minutes)
     w = int(minutes * 60 * 1e9 / buckets)
     rows = q("""SELECT (start_ns-?)/? b, COUNT(*) n, SUM(status=2) err FROM spans

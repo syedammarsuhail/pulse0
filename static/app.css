@@ -293,7 +293,7 @@ pre.code{margin:0;background:var(--code);border:1px solid var(--line);border-rad
 @media (max-width:560px){#range-label,.brand b,.caret,#auto,.switch{display:none}.btn.icon{width:30px}#top .btn{padding:0 8px}#content{margin-left:0;padding-bottom:52px}#rail,#rail:hover,#rail:has(a:focus-visible){top:auto;bottom:0;left:0;right:0;width:100%;height:52px;flex-direction:row;align-items:center;padding:4px 6px;gap:2px;overflow-x:auto;overflow-y:hidden;border-right:0;border-top:1px solid var(--line);box-shadow:none}#rail .grp,#rail .sep{display:none!important}#rail a{flex:none;width:44px;height:40px;justify-content:center;padding:0}#rail a>span:not(.badge){display:none}#rail a.on::before{display:none}#rail a .badge{position:absolute;top:1px;right:1px;margin:0}.kpis{grid-template-columns:repeat(2,1fr)}.drawer,.drawer.ask{width:100vw}}
 
 /* ---- assistant (Claude chat) */
-.ask-in{align-items:flex-end}.ask-in textarea{flex:1;min-height:38px;max-height:120px;padding:9px 11px;resize:none;line-height:1.35;font:inherit}
+.ask-in{align-items:flex-end}.ask-in textarea{flex:1;min-height:38px;max-height:120px;padding:9px 11px;resize:none;font:inherit;line-height:1.35}
 .ask-foot{padding:8px 16px 10px;font-size:11.5px;color:var(--text-3);border-top:1px solid var(--line);background:var(--surface)}.ask-foot code{font:11px var(--mono);color:var(--text-2)}
 .aibadge{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:600;background:var(--surface-3);color:var(--text-2);border:1px solid var(--line);white-space:nowrap}
 .aibadge.claude{background:var(--accent-bg);color:var(--accent-2);border-color:transparent}.aibadge svg{width:11px;height:11px}
