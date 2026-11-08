@@ -206,6 +206,10 @@ run_tests() {
 }
 
 teardown() {
+  say "Removing load balancer service"
+  if aws eks update-kubeconfig --name "$NAME" --region "$REGION" >/dev/null 2>&1; then
+    kubectl -n "$NS" delete svc pulse0 --ignore-not-found --timeout=180s || true
+  fi
   say "Deleting EKS cluster $NAME (15-20 min)"
   eksctl delete cluster --name "$NAME" --region "$REGION" --wait || true
   aws ecr delete-repository --repository-name "$REPO_NAME" --region "$REGION" --force >/dev/null 2>&1 || true
