@@ -10,3 +10,5 @@ pulse0.tar.gz
 .env
 test-apps/shop/k8s/shop.yaml
 shop-build.log
+.eks-tmp/
+.eks-tmp-cluster.yaml

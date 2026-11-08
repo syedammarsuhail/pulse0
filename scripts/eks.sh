@@ -46,7 +46,7 @@ build_image() {
   say "Source bundle to S3"
   aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" >/dev/null 2>&1 ||
     aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" >/dev/null
-  local zip tmp; tmp="$(mktemp -d)"; zip="$tmp/src.zip"
+  local zip tmp; tmp=".eks-tmp"; rm -rf "$tmp"; mkdir -p "$tmp"; zip="$tmp/src.zip"
   "$PY" - "$zip" <<'PYEOF'
 import os, sys, zipfile
 with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as z:
@@ -123,7 +123,7 @@ ensure_cluster() {
     echo "cluster exists, reusing"
     aws eks update-kubeconfig --name "$NAME" --region "$REGION" >/dev/null
   else
-    local cfg; cfg="$(mktemp)"
+    local cfg=".eks-tmp-cluster.yaml"
     cat >"$cfg" <<EOF
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
