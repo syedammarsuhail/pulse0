@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-anyio httpx
+
+      - name: Run tests
+        env:
+          PULSE0_DB: /tmp/pulse0_test.db
+          PULSE0_CACHE_TTL: "0"
+        run: python -m pytest tests/ -q --tb=short
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run mapkit tests
+        run: node tests/test_mapkit.js
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Lint Helm chart
+        run: helm lint helm/pulse0 && helm template p helm/pulse0 -f helm/pulse0/values-eks.yaml --set auth.token=x

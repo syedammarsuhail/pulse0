@@ -1,0 +1,52 @@
+name: SonarCloud Analysis
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  sonarcloud:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for blame and coverage tracking
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-anyio httpx pytest-cov
+
+      - name: Run tests with coverage
+        env:
+          PULSE0_DB: /tmp/pulse0_test.db
+          PULSE0_CACHE_TTL: "0"
+        run: |
+          python -m pytest tests/ -q \
+            --cov=. --cov-report=xml:coverage.xml \
+            --ignore=tests/test_mapkit.js
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ github.repository_owner }}
+            -Dsonar.projectKey=${{ github.repository_owner }}_pulse0
+            -Dsonar.sources=server.py,static/,enterprise/
+            -Dsonar.tests=tests/
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.python.version=3.12
+            -Dsonar.javascript.file.suffixes=.js
+            -Dsonar.exclusions=test-apps/**,demo/**,helm/**,node_modules/**
