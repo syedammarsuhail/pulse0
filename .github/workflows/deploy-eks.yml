@@ -1,0 +1,97 @@
+name: Deploy to EKS
+
+# Manual pipeline: build the image on AWS, deploy to a temporary EKS cluster, smoke-test it,
+# and tear it down when finished. Run it from the Actions tab ("Run workflow").
+#
+# Required repository secrets:
+#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY   credentials allowed to manage EKS, ECR, CodeBuild, S3 and IAM
+#   SUPABASE_DB_URL                              postgres connection string for the database
+#   PULSE0_TOKEN                                 bearer token that protects the deployed instance
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        default: deploy-and-test
+        options: [deploy-and-test, deploy, test, teardown]
+      cluster_name:
+        description: EKS cluster name (created if missing)
+        default: pulse0-test
+      region:
+        description: AWS region
+        default: us-east-1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eks-${{ inputs.cluster_name }}
+  cancel-in-progress: false
+
+jobs:
+  eks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      AWS_REGION: ${{ inputs.region }}
+      CLUSTER_NAME: ${{ inputs.cluster_name }}
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      PULSE0_TOKEN: ${{ secrets.PULSE0_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check required secrets
+        run: |
+          missing=0
+          for s in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY PULSE0_TOKEN; do
+            [ -n "${!s}" ] || { echo "::error::secret $s is not set"; missing=1; }
+          done
+          if [ "${{ inputs.action }}" = "deploy" ] || [ "${{ inputs.action }}" = "deploy-and-test" ]; then
+            [ -n "$SUPABASE_DB_URL" ] || { echo "::error::secret SUPABASE_DB_URL is not set"; missing=1; }
+          fi
+          exit $missing
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.region }}
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - name: Install eksctl
+        run: |
+          curl -sSL "https://github.com/eksctl-io/eksctl/releases/download/v0.194.0/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
+          sudo mv /tmp/eksctl /usr/local/bin/eksctl
+          eksctl version
+
+      - name: Run pipeline
+        id: run
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          case "${{ inputs.action }}" in
+            deploy-and-test) scripts/eks.sh all ;;
+            *)               scripts/eks.sh "${{ inputs.action }}" ;;
+          esac
+
+      - name: Summary
+        if: always() && inputs.action != 'teardown'
+        run: |
+          {
+            echo "### EKS pipeline: ${{ inputs.action }} on \`${{ inputs.cluster_name }}\`"
+            echo "Result: \`${{ steps.run.outcome }}\`"
+            [ -n "${{ steps.run.outputs.ui_url }}" ] && echo "UI: ${{ steps.run.outputs.ui_url }}"
+            echo "The cluster costs about \$0.26/hour while it exists. Run this workflow again with action \`teardown\` to remove it."
+          } >> "$GITHUB_STEP_SUMMARY"

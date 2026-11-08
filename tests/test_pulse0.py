@@ -772,3 +772,16 @@ def test_ttl_cache_single_flight_and_expiry(monkeypatch):
     assert heavy(15) == {"m": 15.0} and len(calls) == 1                  # int/float args share the entry
     time.sleep(0.35); heavy(15.0); assert len(calls) == 2                # expired -> recomputed
     heavy(60.0); assert len(calls) == 3                                  # different args -> separate entry
+
+
+def test_pg_sql_translation(monkeypatch):
+    monkeypatch.setattr(server, "USE_PG", True)
+    monkeypatch.setattr(server, "PG_SCHEMA", "pulse0")
+    # '' (empty string literal) must not swallow later placeholders
+    out = server._pg_sql("SELECT 1 FROM spans WHERE start_ns>=? AND (parent_id='' OR kind=2) AND service=?")
+    assert out.count("%s") == 2 and "?" not in out
+    # bound json path (metrics group_by / log key=value filters)
+    out = server._pg_sql("SELECT json_extract(attrs, ?) grp FROM metrics WHERE name=?")
+    assert "jsonb_path_query_first(attrs, %s::jsonpath)" in out and out.count("%s") == 2
+    out = server._pg_sql("SELECT CAST(json_extract(attrs, ?) AS TEXT)=? FROM logs")
+    assert "json_extract" not in out

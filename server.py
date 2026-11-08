@@ -166,7 +166,7 @@ def _pg_sql(sql):
     out, i, in_str = [], 0, False
     while i < len(sql):
         ch = sql[i]
-        if ch == "'" and (i == 0 or sql[i-1] != "'"):
+        if ch == "'":
             in_str = not in_str
             out.append(ch)
         elif ch == '?' and not in_str:
@@ -191,6 +191,9 @@ def _pg_sql(sql):
         key = key.strip('"')
         return f"{col}->>'{key}'"
     sql = re.sub(r'''json_extract\(\s*(\w+)\s*,\s*'\$\.["']?([^'"]+)["']?'\s*\)''', _jx, sql)
+
+    # json_extract(col, %s) with a bound '$."key"' path -> jsonpath lookup returning text
+    sql = re.sub(r"json_extract\(\s*(\w+)\s*,\s*%s\s*\)", r"(jsonb_path_query_first(\1, %s::jsonpath) #>> '{}')", sql)
 
     # CAST(col->>'key' AS TEXT) -> col->>'key'  (already text in Postgres)
     sql = re.sub(r"CAST\(\s*([\w.]+->>'[^']+')\s+AS\s+TEXT\)", r'\1', sql, flags=re.IGNORECASE)
