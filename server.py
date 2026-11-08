@@ -37,6 +37,7 @@ AUTH_TOKEN = os.environ.get("PULSE0_TOKEN", "")  # optional bearer token for ing
 # ---------------------------------------------------------------- Tier / licensing
 # PULSE0_TIER: "community" (free, limited) or "pro" (paid, unlimited).
 # A valid PULSE0_LICENSE_KEY (validated by the enterprise module) activates Pro.
+# On first install, a 14-day Pro trial is activated automatically.
 _LICENSE_KEY = os.environ.get("PULSE0_LICENSE_KEY", "")
 _ENTERPRISE = False
 try:
@@ -45,16 +46,55 @@ try:
     _LICENSE_VALID = validate_license(_LICENSE_KEY) if _LICENSE_KEY else False
 except ImportError:
     _LICENSE_VALID = bool(_LICENSE_KEY)
+
+TRIAL_DAYS = 14
+_TRIAL_START = 0
+_TRIAL_ACTIVE = False
+_TRIAL_DAYS_LEFT = 0
+
+def _init_trial(db_path):
+    """Check/initialize trial state from the meta table. Called after DB init."""
+    global _TRIAL_START, _TRIAL_ACTIVE, _TRIAL_DAYS_LEFT, TIER, IS_PRO, RETENTION_HOURS
+    if _LICENSE_VALID or os.environ.get("PULSE0_TIER", "").strip().lower() == "pro":
+        return
+    try:
+        c = sqlite3.connect(db_path, check_same_thread=False)
+        c.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
+        row = c.execute("SELECT value FROM meta WHERE key='trial_start'").fetchone()
+        now = int(time.time())
+        if row:
+            _TRIAL_START = int(row[0])
+        else:
+            _TRIAL_START = now
+            c.execute("INSERT INTO meta(key,value) VALUES('trial_start',?)", (str(now),))
+            c.commit()
+        c.close()
+        elapsed = now - _TRIAL_START
+        _TRIAL_DAYS_LEFT = max(0, TRIAL_DAYS - int(elapsed / 86400))
+        _TRIAL_ACTIVE = _TRIAL_DAYS_LEFT > 0
+        if _TRIAL_ACTIVE:
+            TIER = "pro"
+            IS_PRO = True
+            RETENTION_HOURS = float(os.environ.get("PULSE0_RETENTION_HOURS", "72"))
+    except Exception:
+        pass
+
 TIER = "pro" if _LICENSE_VALID else os.environ.get("PULSE0_TIER", "community").strip().lower()
 if TIER not in ("community", "pro"):
     TIER = "community"
 IS_PRO = TIER == "pro"
-if IS_PRO and _ENTERPRISE:
-    print(f"Pulse0 Pro activated (enterprise module loaded, license {'validated' if _LICENSE_KEY else 'env override'})")
-elif IS_PRO:
-    print("Pulse0 Pro activated (PULSE0_TIER override, no enterprise module)")
-else:
-    print("Pulse0 Community tier (set PULSE0_LICENSE_KEY to activate Pro)")
+def _print_tier():
+    if IS_PRO and _ENTERPRISE and _LICENSE_VALID:
+        print(f"Pulse0 Pro activated (enterprise module, license validated)")
+    elif IS_PRO and _TRIAL_ACTIVE:
+        print(f"Pulse0 Pro trial ({_TRIAL_DAYS_LEFT} days remaining)")
+    elif IS_PRO:
+        print("Pulse0 Pro activated (PULSE0_TIER override)")
+    else:
+        if _TRIAL_START and not _TRIAL_ACTIVE:
+            print("Pulse0 Community tier (Pro trial expired, set PULSE0_LICENSE_KEY to upgrade)")
+        else:
+            print("Pulse0 Community tier (set PULSE0_LICENSE_KEY to activate Pro)")
 
 # Community-tier limits (Pro is unlimited)
 TIER_LIMITS = {
@@ -230,6 +270,9 @@ if USE_PG:
 # ---- SQLite single-tenant (when not USE_PG) ----
 _lock = threading.Lock()
 _conn = None if USE_PG else _open_db(DB_PATH)
+if not USE_PG and _conn:
+    _init_trial(DB_PATH)
+_print_tier()
 
 # Which SQLite silo the current request / worker iteration reads and writes. None = the default
 # (self-hosted) database. The hosted-mode auth middleware sets this from the API key's project, so
@@ -624,7 +667,11 @@ async def _vexc(request: Request, exc: RequestValidationError):
 
 @app.exception_handler(HTTPException)
 async def _hexc(request: Request, exc: HTTPException):
-    return JSONResponse({"error": "http_error", "message": exc.detail, "status": exc.status_code, "request_id": getattr(request.state, "rid", "")}, status_code=exc.status_code)
+    if isinstance(exc.detail, dict) and "error" in exc.detail:
+        body = {**exc.detail, "status": exc.status_code, "request_id": getattr(request.state, "rid", "")}
+    else:
+        body = {"error": "http_error", "message": exc.detail, "status": exc.status_code, "request_id": getattr(request.state, "rid", "")}
+    return JSONResponse(body, status_code=exc.status_code)
 
 from fastapi.middleware.cors import CORSMiddleware
 # Allow browser (Angular/React/Vue) RUM to POST OTLP directly from any origin.
@@ -2572,8 +2619,13 @@ def api_audit(limit: int = 200, actor: str = ""):
 @app.get("/api/mode")
 def api_mode():
     """Which deployment mode this server runs in (public: the UI needs it before sign-in)."""
+    trial = None
+    if _TRIAL_START and not _LICENSE_VALID:
+        trial = {"active": _TRIAL_ACTIVE, "days_left": _TRIAL_DAYS_LEFT,
+                 "total_days": TRIAL_DAYS, "expired": not _TRIAL_ACTIVE and _TRIAL_DAYS_LEFT == 0}
     return {"mode": MODE, "tier": TIER, "is_pro": IS_PRO,
             "limits": TIER_LIMITS if not IS_PRO else None,
+            "trial": trial,
             "features": {"multi_tenant": HOSTED, "organizations": HOSTED, "quotas": HOSTED,
                          "admin_api": HOSTED, "ai_assistant": IS_PRO and bool(_ai_key()),
                          "sso": IS_PRO, "rbac": IS_PRO, "postgres": IS_PRO or USE_PG,

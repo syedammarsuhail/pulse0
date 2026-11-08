@@ -30,6 +30,11 @@
 .tn-meter-row{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:6px;color:var(--text-2)}
 .tn-key{font-family:var(--mono);font-size:12px}
 .tn-actions{display:flex;gap:6px;justify-content:flex-end}
+.trial-banner{position:sticky;top:0;z-index:90;display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 16px;font-size:13px;font-weight:500}
+.trial-banner.active{background:linear-gradient(90deg,var(--accent-bg),var(--surface));color:var(--accent-2)}
+.trial-banner.expired{background:var(--err-bg,rgba(239,68,68,.12));color:var(--err)}
+.trial-banner .days{font-weight:700;font-size:15px}
+.trial-banner .btn{font-size:12px;padding:4px 12px}
 `));
 
   // ---------------------------------------------------------------- helpers
@@ -65,12 +70,14 @@
       const m = await (await fetch("/api/mode")).json();
       P.mode = m.mode; P.features = m.features || {};
       P.tier = m.tier || "community"; P.isPro = !!m.is_pro; P.tierLimits = m.limits || null;
+      P.trial = m.trial || null;
     } catch { /* old server: selfhosted */ }
     if (!P.isPro) document.body.classList.add("community");
     const cfg = P.NAV.find(g => g[0] === "Configure")[1];
     cfg.unshift(["play", "Get started", "#/onboarding"]);
     if (hosted()) cfg.unshift(["services", "Organization", "#/organization"]);
     origStart();
+    if (P.trial) showTrialBanner();
     if (!P.isPro) {
       const gated = new Set(["slo", "synth"]);
       document.querySelectorAll("#rail a").forEach(a => {
@@ -83,6 +90,29 @@
     }
     firstRun();
   };
+
+  function showTrialBanner() {
+    const t = P.trial; if (!t) return;
+    if (document.querySelector(".trial-banner")) return;
+    const banner = el("div", { class: "trial-banner " + (t.active ? "active" : "expired") });
+    if (t.active) {
+      banner.append(
+        el("span", {}, "Pro Trial — "),
+        el("span", { class: "days" }, `${t.days_left} day${t.days_left !== 1 ? "s" : ""} left`),
+        el("span", {}, " — all Pro features unlocked"),
+        el("button", { class: "btn sm primary", on: { click: () => P.upgradeModal({ error: "pro_required", feature: "Pro features" }) } }, "Get Pro →")
+      );
+    } else {
+      banner.append(
+        el("span", {}, "Your 14-day Pro trial has ended. "),
+        el("button", { class: "btn sm primary", on: { click: () => P.upgradeModal({ error: "pro_required", feature: "Pro features" }) } }, "Upgrade to Pro"),
+        el("span", {}, " to restore unlimited access.")
+      );
+    }
+    const content = document.querySelector("#content");
+    const main = document.querySelector("#main");
+    if (content && main) content.insertBefore(banner, main);
+  }
 
   async function firstRun() {
     if (store.get("onboarded", "")) return;
@@ -342,16 +372,22 @@ service:
       const rows = [["Mode", MODES[P.mode] || P.mode], ["Data lives", hosted() ? "On Pulse infrastructure, one database per project" : "In your own cluster / volume"],
         ["Organizations", hosted() ? "enabled" : "not used (single workspace)"], ["Quotas & retention", hosted() ? "per organization, set by the operator" : "PULSE0_RETENTION_HOURS"],
         ["Claude assistant", P.features.ai_assistant ? "enabled (query snippets go to Anthropic)" : "off"]];
+      const isTrial = P.trial?.active;
+      const trialExpired = P.trial && !P.trial.active;
+      const planLabel = isTrial ? `Pro Trial (${P.trial.days_left} days left)` : P.isPro ? "Pro" : trialExpired ? "Community (trial expired)" : "Community (free)";
       const tierRows = P.isPro
-        ? [["Plan", "Pro"], ["Services", "Unlimited"], ["Retention", "Unlimited"], ["Dashboards", "Unlimited"], ["Alerts", "Unlimited"], ["SLOs", "Unlimited"], ["Synthetics", "Unlimited"]]
-        : [["Plan", "Community (free)"],
+        ? [["Plan", planLabel], ["Services", "Unlimited"], ["Retention", "Unlimited"], ["Dashboards", "Unlimited"], ["Alerts", "Unlimited"], ["SLOs", "Unlimited"], ["Synthetics", "Unlimited"]]
+        : [["Plan", planLabel],
            ["Services", `${P.tierLimits?.max_services || 5} max`], ["Retention", `${P.tierLimits?.retention_days || 7} days`],
            ["Dashboards", `${P.tierLimits?.max_dashboards || 3} max`], ["Alerts", `${P.tierLimits?.max_alerts || 3} max`],
            ["SLOs", `${P.tierLimits?.max_slos || 1} max`], ["Synthetics", `${P.tierLimits?.max_synthetics || 1} max`]];
+      const pillLabel = isTrial ? "Pro Trial" : P.isPro ? "Pro" : "Community";
+      const pillColor = isTrial ? "info" : P.isPro ? "ok" : "";
       grid.prepend(panel("Plan", el("div", { class: "col" },
         el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" },
-          pill(P.isPro ? "Pro" : "Community", P.isPro ? "ok" : ""),
-          !P.isPro ? el("button", { class: "btn sm primary", on: { click: () => P.upgradeModal({ error: "pro_required", feature: "Pro features" }) } }, "Upgrade to Pro") : null),
+          pill(pillLabel, pillColor),
+          isTrial ? el("span", { style: "font-size:13px;color:var(--text-2)" }, `${P.trial.days_left} day${P.trial.days_left !== 1 ? "s" : ""} remaining`) : null,
+          !P.isPro || isTrial ? el("button", { class: "btn sm primary", on: { click: () => P.upgradeModal({ error: "pro_required", feature: "Pro features" }) } }, isTrial ? "Get Pro →" : "Upgrade to Pro") : null),
         el("div", { class: "kv", style: "margin:0 -14px" }, ...tierRows.flat().map(x => el("div", {}, x))))));
       grid.prepend(panel("Deployment mode", el("div", { class: "col" },
         el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, pill(MODES[P.mode] || P.mode, hosted() ? "info" : "ok"), el("a", { class: "btn sm", href: "#/onboarding" }, "Compare modes & connect apps"), hosted() ? el("a", { class: "btn sm", href: "#/organization" }, "Organization") : null),
