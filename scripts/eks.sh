@@ -167,13 +167,13 @@ deploy_app() {
   helm lint ./helm/pulse0
   helm upgrade --install pulse0 ./helm/pulse0 -n "$NS" --create-namespace \
     -f ./helm/pulse0/values-eks.yaml \
-    --set image.repository="$REPO" --set image.tag="$TAG" --set image.pullPolicy=Always \
+    --set image.repository="$REPO" --set-string image.tag="$TAG" --set image.pullPolicy=Always \
     --set postgres.enabled=true --set postgres.existingSecret=pulse0-db \
     --set persistence.enabled=false \
     --set service.type=LoadBalancer \
     --set auth.token="$TOKEN" \
-    --set env.PULSE0_CACHE_TTL=45 \
-    --set env.PULSE0_RETENTION_HOURS="${RETENTION_HOURS:-6}" \
+    --set-string env.PULSE0_CACHE_TTL=45 \
+    --set-string env.PULSE0_RETENTION_HOURS="${RETENTION_HOURS:-6}" \
     --wait --timeout 8m
   kubectl -n "$NS" rollout status statefulset/pulse0 --timeout=300s
 

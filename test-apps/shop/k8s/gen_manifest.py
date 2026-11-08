@@ -64,6 +64,6 @@ for name, (image, req, lim, extra) in SERVICES.items():
 deployment("storefront", "shop-storefront", "16Mi", "64Mi", {"PULSE0_URL": PULSE0_URL})
 # load generator (control API on :9000)
 deployment("loadgen", "shop-loadgen", "32Mi", "128Mi",
-           {"TARGET": "http://gateway:8000", "PROFILE": "steady", "RPS": "5", "DURATION": "0",
+           {"TARGET": "http://gateway:8000", "PROFILE": "steady", "RPS": "1", "DURATION": "0",
             "ERROR_RATE": "0.08", "SLOW_RATE": "0.05"}, port=9000)
 print("".join(out))

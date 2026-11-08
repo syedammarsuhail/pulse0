@@ -75,4 +75,4 @@ spec:
           command: [python, loadgen.py]
           env:
             - { name: FRONTEND_URL, value: "http://frontend.demo.svc.cluster.local:8000" }
-            - { name: RPS, value: "6" }
+            - { name: RPS, value: "1" }
