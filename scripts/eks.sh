@@ -168,6 +168,7 @@ deploy_app() {
     --set service.type=LoadBalancer \
     --set auth.token="$TOKEN" \
     --set env.PULSE0_CACHE_TTL=45 \
+    --set env.PULSE0_RETENTION_HOURS="${RETENTION_HOURS:-6}" \
     --wait --timeout 8m
   kubectl -n "$NS" rollout status statefulset/pulse0 --timeout=300s
 

@@ -58,17 +58,23 @@ def _init_trial(db_path):
     if _LICENSE_VALID or os.environ.get("PULSE0_TIER", "").strip().lower() == "pro":
         return
     try:
-        c = sqlite3.connect(db_path, check_same_thread=False)
-        c.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
-        row = c.execute("SELECT value FROM meta WHERE key='trial_start'").fetchone()
         now = int(time.time())
-        if row:
-            _TRIAL_START = int(row[0])
+        if USE_PG:
+            with _pg_pool.connection() as pc:
+                pc.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
+                pc.execute("INSERT INTO meta(key,value) VALUES('trial_start',%s) ON CONFLICT (key) DO NOTHING", (str(now),))
+                _TRIAL_START = int(pc.execute("SELECT value FROM meta WHERE key='trial_start'").fetchone()[0])
         else:
-            _TRIAL_START = now
-            c.execute("INSERT INTO meta(key,value) VALUES('trial_start',?)", (str(now),))
-            c.commit()
-        c.close()
+            c = sqlite3.connect(db_path, check_same_thread=False)
+            c.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
+            row = c.execute("SELECT value FROM meta WHERE key='trial_start'").fetchone()
+            if row:
+                _TRIAL_START = int(row[0])
+            else:
+                _TRIAL_START = now
+                c.execute("INSERT INTO meta(key,value) VALUES('trial_start',?)", (str(now),))
+                c.commit()
+            c.close()
         elapsed = now - _TRIAL_START
         _TRIAL_DAYS_LEFT = max(0, TRIAL_DAYS - int(elapsed / 86400))
         _TRIAL_ACTIVE = _TRIAL_DAYS_LEFT > 0
@@ -290,7 +296,9 @@ if USE_PG:
 # ---- SQLite single-tenant (when not USE_PG) ----
 _lock = threading.Lock()
 _conn = None if USE_PG else _open_db(DB_PATH)
-if not USE_PG and _conn:
+if USE_PG:
+    _init_trial(None)
+elif _conn:
     _init_trial(DB_PATH)
 _print_tier()
 
