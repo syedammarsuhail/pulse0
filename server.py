@@ -36,12 +36,25 @@ AUTH_TOKEN = os.environ.get("PULSE0_TOKEN", "")  # optional bearer token for ing
 
 # ---------------------------------------------------------------- Tier / licensing
 # PULSE0_TIER: "community" (free, limited) or "pro" (paid, unlimited).
-# Set PULSE0_LICENSE_KEY to a valid key to activate Pro; without it, tier is always "community".
+# A valid PULSE0_LICENSE_KEY (validated by the enterprise module) activates Pro.
 _LICENSE_KEY = os.environ.get("PULSE0_LICENSE_KEY", "")
-TIER = "pro" if _LICENSE_KEY else os.environ.get("PULSE0_TIER", "community").strip().lower()
+_ENTERPRISE = False
+try:
+    from enterprise.license import validate_license
+    _ENTERPRISE = True
+    _LICENSE_VALID = validate_license(_LICENSE_KEY) if _LICENSE_KEY else False
+except ImportError:
+    _LICENSE_VALID = bool(_LICENSE_KEY)
+TIER = "pro" if _LICENSE_VALID else os.environ.get("PULSE0_TIER", "community").strip().lower()
 if TIER not in ("community", "pro"):
     TIER = "community"
 IS_PRO = TIER == "pro"
+if IS_PRO and _ENTERPRISE:
+    print(f"Pulse0 Pro activated (enterprise module loaded, license {'validated' if _LICENSE_KEY else 'env override'})")
+elif IS_PRO:
+    print("Pulse0 Pro activated (PULSE0_TIER override, no enterprise module)")
+else:
+    print("Pulse0 Community tier (set PULSE0_LICENSE_KEY to activate Pro)")
 
 # Community-tier limits (Pro is unlimited)
 TIER_LIMITS = {

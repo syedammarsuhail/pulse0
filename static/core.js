@@ -70,14 +70,61 @@
 
   // ---------------------------------------------------------------- api
   class AuthError extends Error { }
+  class TierError extends Error { constructor(j) { super(j.message); this.detail = j; } }
+
+  function upgradeModal(detail) {
+    const feat = detail.feature || detail.message || "This feature";
+    const limit = detail.limit;
+    const isPro = detail.error === "pro_required";
+    const title = isPro ? "Pro Feature" : "Limit Reached";
+    const desc = isPro
+      ? `${feat} is available on the Pro plan.`
+      : `You've reached the Community limit of ${limit}.`;
+    const benefits = [
+      ["Unlimited services", "Monitor every microservice with no cap"],
+      ["Unlimited retention", "Keep data as long as you need"],
+      ["Unlimited dashboards & alerts", "Build dashboards, alerts, SLOs, and synthetics without limits"],
+      ["SSO / OIDC", "Single sign-on with your identity provider"],
+      ["Role-based access", "Viewer, editor, and admin roles with audit log"],
+      ["AI Assistant", "Claude-powered analysis of your telemetry"],
+      ["Postgres backend", "Scale beyond SQLite with PostgreSQL"],
+      ["Priority support", "Email and Slack support from the team"],
+    ];
+    const list = el("div", { class: "upgrade-benefits" },
+      ...benefits.map(([t, d]) => el("div", { class: "ub-row" },
+        el("div", { class: "ub-check" }, icon("check", 14)),
+        el("div", {}, el("div", { class: "ub-title" }, t), el("div", { class: "ub-desc" }, d)))));
+    const price = el("div", { class: "upgrade-price" },
+      el("div", { class: "up-amount" }, "$490"), el("div", { class: "up-period" }, "/ year"),
+      el("div", { class: "up-note" }, "That's less than $41/mo. No usage fees, no per-seat charges."));
+    const body = el("div", { class: "upgrade-modal" },
+      el("div", { class: "um-icon" }, icon("sparkle", 28)),
+      el("div", { class: "um-desc" }, desc),
+      list, price,
+      el("div", { class: "um-key" },
+        el("div", { class: "muted", style: "font-size:12px;margin-bottom:6px" }, "Already have a license key?"),
+        el("div", { style: "display:flex;gap:8px" },
+          el("input", { id: "upgrade-key-input", type: "text", placeholder: "PULSE0-XXXX-XXXX-XXXX", style: "flex:1;font-family:var(--mono);font-size:12px" }),
+          el("button", { class: "btn sm", on: { click: () => { const v = document.getElementById("upgrade-key-input").value.trim(); if (v) { store.set("license_key", v); toast("License key saved. Restart the server with PULSE0_LICENSE_KEY set to activate Pro.", "ok"); } } } }, "Apply"))));
+    modal({ title, width: 520, body, actions: [
+      { label: "Maybe later" },
+      { label: "Get Pro →", primary: true, onClick: () => { window.open("https://pulse0.dev/pricing", "_blank"); } }
+    ] });
+  }
+  P.upgradeModal = upgradeModal;
+
   async function api(path, o = {}) {
     const h = {}, tok = store.get("token", "");
     if (tok) h.Authorization = "Bearer " + tok;
-    const proj = store.get("project", ""); if (proj) h["x-pulse0-project"] = proj; // hosted mode: org admin keys pick a project
+    const proj = store.get("project", ""); if (proj) h["x-pulse0-project"] = proj;
     if (o.body) h["Content-Type"] = "application/json";
     const r = await fetch("/api" + path, { method: o.method || "GET", headers: h, body: o.body ? JSON.stringify(o.body) : undefined });
     if (r.status === 401) throw new AuthError("This Pulse0 requires an API token.");
     if (r.status === 400 && P.onProjectRequired) { const j = await r.clone().json().catch(() => ({})); if (j.error === "project_required") { P.onProjectRequired(j); throw new Error(j.message); } }
+    if (r.status === 403) {
+      const j = await r.clone().json().catch(() => ({}));
+      if (j.error === "tier_limit" || j.error === "pro_required") { upgradeModal(j); throw new TierError(j); }
+    }
     if (!r.ok) {
       let m = r.statusText;
       try { const j = await r.json(); m = j.message || (j.details && j.details.map(d => `${(d.loc || []).slice(-1)[0]}: ${d.msg}`).join("; ")) || j.error || m; } catch { /* keep */ }
@@ -88,7 +135,7 @@
   const qs = o => { const u = new URLSearchParams(); for (const [k, v] of Object.entries(o)) if (v !== "" && v != null && v !== false) u.set(k, v === true ? "1" : v); return u.toString(); };
   let svcCache = null;
   P.services = async (all = false) => { if (!svcCache) svcCache = api("/services?minutes=" + S.minutes); const r = await svcCache; return all ? r : r.filter(s => s.n > 0); };
-  Object.assign(P, { $, el, sv, icon, store, api, AuthError, qs, compact, fmt, ms, pct, rate, clock, stamp, ago, sevName, pill, errPill, healthPill, copyText, COLORS, rangeLabel });
+  Object.assign(P, { $, el, sv, icon, store, api, AuthError, TierError, qs, compact, fmt, ms, pct, rate, clock, stamp, ago, sevName, pill, errPill, healthPill, copyText, COLORS, rangeLabel });
 
   // ---------------------------------------------------------------- toast / modal / drawer
   function toast(msg, kind = "") {
@@ -237,7 +284,8 @@
       renderCrumbs(crumbs, m.view);
       await m.view.render(page, ctx);
     } catch (e) {
-      page.replaceChildren(e instanceof AuthError ? authCard() : el("div", { class: "panel" }, empty("Something went wrong", e.message)));
+      if (e instanceof TierError) { page.replaceChildren(el("div", { class: "panel" }, empty("Upgrade to Pro", e.message, el("button", { class: "btn primary", on: { click: () => upgradeModal(e.detail) } }, "See Pro features")))); }
+      else page.replaceChildren(e instanceof AuthError ? authCard() : el("div", { class: "panel" }, empty("Something went wrong", e.message)));
     }
     if (id !== renderId) return;
     $("#main").replaceChildren(page);

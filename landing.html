@@ -1,0 +1,522 @@
+<title>Pulse0</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Space+Mono:wght@400;700&display=swap">
+<style>
+/* Dark-first: observability tools live in dark terminals */
+:root {
+  --bg: #090C12;
+  --bg-2: #0F1319;
+  --bg-3: #161B24;
+  --bg-card: #12161E;
+  --fg: #E4E8F1;
+  --fg-2: #8B93A7;
+  --fg-3: #555D73;
+  --accent: #00D47B;
+  --accent-dim: rgba(0,212,123,0.10);
+  --accent-hover: #00B868;
+  --err: #F04848;
+  --warn: #F5A623;
+  --blue: #4C8BF5;
+  --line: rgba(255,255,255,0.06);
+  --line-2: rgba(255,255,255,0.10);
+  --sans: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --mono: 'Space Mono', ui-monospace, 'Courier New', monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #FAFBFC; --bg-2: #F2F4F7; --bg-3: #E6E9EF; --bg-card: #FFFFFF;
+    --fg: #0F1728; --fg-2: #4B5468; --fg-3: #8B93A7;
+    --accent: #00915A; --accent-dim: rgba(0,145,90,0.07); --accent-hover: #007A4C;
+    --err: #D03030; --warn: #C78000; --blue: #3B6ED8;
+    --line: rgba(0,0,0,0.07); --line-2: rgba(0,0,0,0.12);
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #FAFBFC; --bg-2: #F2F4F7; --bg-3: #E6E9EF; --bg-card: #FFFFFF;
+  --fg: #0F1728; --fg-2: #4B5468; --fg-3: #8B93A7;
+  --accent: #00915A; --accent-dim: rgba(0,145,90,0.07); --accent-hover: #007A4C;
+  --err: #D03030; --warn: #C78000; --blue: #3B6ED8;
+  --line: rgba(0,0,0,0.07); --line-2: rgba(0,0,0,0.12);
+  color-scheme: light;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--sans);
+  font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 100; background: var(--bg); }
+.w { max-width: 1080px; margin: 0 auto; }
+h1,h2,h3,h4 { line-height: 1.15; text-wrap: balance; font-weight: 700; color: var(--fg); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { font-family: var(--mono); font-size: 0.875em; }
+
+/* nav */
+nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 50; background: var(--bg); border-bottom: 1px solid var(--line); }
+.ni { display: flex; align-items: center; gap: 28px; padding-block: 16px; max-width: 1080px; margin: 0 auto; flex-wrap: wrap; }
+.logo { font-weight: 700; font-size: 18px; display: flex; align-items: center; gap: 10px; color: var(--fg); }
+.lm { width: 32px; height: 32px; border-radius: 8px; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; color: var(--bg); font-family: var(--mono); }
+.nl { display: flex; gap: 24px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+.nl a { color: var(--fg-2); font-size: 14px; font-weight: 500; transition: color .15s; }
+.nl a:hover { color: var(--fg); text-decoration: none; }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 24px; border-radius: 8px; font-weight: 600; font-size: 14px; border: none; cursor: pointer; transition: all .15s; font-family: var(--sans); text-decoration: none; }
+.btn:hover { text-decoration: none; }
+.bp { background: var(--accent); color: #000; }
+.bp:hover { background: var(--accent-hover); }
+.bo { background: transparent; border: 1px solid var(--line-2); color: var(--fg); }
+.bo:hover { border-color: var(--accent); color: var(--accent); }
+.bs { padding: 7px 16px; font-size: 13px; }
+
+/* hero */
+.hero { padding: 100px 0 80px; text-align: center; position: relative; }
+.hero::before { content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 600px; height: 600px; background: radial-gradient(circle, var(--accent-dim) 0%, transparent 70%); pointer-events: none; }
+.hero > * { position: relative; z-index: 1; }
+.hb { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; border-radius: 99px; border: 1px solid var(--line-2); font-size: 13px; font-weight: 500; color: var(--fg-2); margin-bottom: 28px; }
+.hb .d { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.hero h1 { font-size: clamp(36px, 5.5vw, 60px); margin-bottom: 24px; letter-spacing: -0.03em; line-height: 1.08; }
+.hero h1 .em { color: var(--accent); }
+.hero .sub { font-size: 18px; color: var(--fg-2); max-width: 540px; margin: 0 auto 36px; line-height: 1.6; }
+.hero .acts { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+/* stats bar */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border-radius: 12px; overflow: hidden; margin: 0 0 100px; }
+.st { background: var(--bg-2); padding: 24px 20px; text-align: center; }
+.st .n { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.st .n.g { color: var(--accent); }
+.st .l { font-size: 12px; color: var(--fg-3); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; }
+
+/* dashboard mockup */
+.scr { border: 1px solid var(--line-2); border-radius: 12px; overflow: hidden; background: var(--bg-3); margin-bottom: 100px; }
+.scr-bar { display: flex; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.scr-bar span { width: 10px; height: 10px; border-radius: 50%; background: var(--fg-3); opacity: 0.3; }
+.scr-body { padding: 16px; display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; }
+.sp { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 16px; min-width: 0; }
+.sp-h { font-size: 11px; font-weight: 600; color: var(--fg-3); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.sr { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; font-size: 13px; border-bottom: 1px solid var(--line); gap: 8px; }
+.sr:last-child { border: none; }
+.sr .nm { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sr .vl { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pl { font-size: 11px; padding: 2px 8px; border-radius: 99px; font-weight: 600; white-space: nowrap; }
+.pg { background: rgba(0,212,123,0.12); color: var(--accent); }
+.pr { background: rgba(240,72,72,0.12); color: var(--err); }
+.pw { background: rgba(245,166,35,0.12); color: var(--warn); }
+.bar { height: 3px; border-radius: 2px; background: var(--line); margin-top: 6px; }
+.bar i { display: block; height: 100%; border-radius: 2px; }
+.bar .fg { background: var(--accent); }
+.bar .fr { background: var(--err); }
+
+/* sections */
+section { padding-block: 80px; }
+.sl { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 12px; }
+.st2 { font-size: clamp(26px, 3.5vw, 38px); margin-bottom: 14px; letter-spacing: -0.02em; }
+.ss { color: var(--fg-2); max-width: 520px; margin-bottom: 48px; }
+
+/* feature grid */
+.feats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border-radius: 12px; overflow: hidden; }
+.ft { background: var(--bg-card); padding: 32px 28px; }
+.fi { width: 40px; height: 40px; border-radius: 10px; background: var(--accent-dim); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 18px; margin-bottom: 16px; font-weight: 700; }
+.ft h3 { font-size: 16px; margin-bottom: 8px; font-weight: 600; }
+.ft p { font-size: 14px; color: var(--fg-2); line-height: 1.55; }
+
+/* how it works */
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; counter-reset: s; }
+.stp { counter-increment: s; }
+.stp::before { content: counter(s); display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--accent); color: var(--accent); font-weight: 700; font-size: 15px; margin-bottom: 16px; font-family: var(--mono); }
+.stp h3 { font-size: 16px; margin-bottom: 8px; font-weight: 600; }
+.stp p { font-size: 14px; color: var(--fg-2); line-height: 1.55; }
+
+/* install tabs */
+.itabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); }
+.itabs button { background: none; border: none; padding: 11px 22px; font-size: 14px; font-weight: 600; color: var(--fg-3); cursor: pointer; border-bottom: 2px solid transparent; font-family: var(--sans); transition: all .15s; }
+.itabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+.iwrap { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.ip { display: none; padding: 28px; }
+.ip.active { display: block; }
+.ip pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 20px 24px; overflow-x: auto; font-size: 14px; line-height: 1.8; font-family: var(--mono); color: var(--accent); min-width: 0; }
+.ip pre .c { color: var(--fg-3); }
+.ip .nt { font-size: 14px; color: var(--fg-2); margin-top: 14px; }
+
+/* ---- COMPARISON TABLE ---- */
+.cmp { margin-top: 48px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.cmp table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.cmp th, .cmp td { padding: 14px 20px; text-align: left; border-bottom: 1px solid var(--line); }
+.cmp th { font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-3); background: var(--bg-2); }
+.cmp td { color: var(--fg-2); }
+.cmp tr:last-child td { border-bottom: none; }
+.cmp td:first-child { font-weight: 500; color: var(--fg); }
+.cmp .ck { color: var(--accent); font-weight: 700; }
+.cmp .lk { color: var(--fg-3); }
+.cmp .pro-col { background: var(--accent-dim); }
+.cmp th.pro-col { color: var(--accent); }
+.cmp-wrap { overflow-x: auto; min-width: 0; }
+
+/* pricing */
+.pgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.pc { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 32px 28px; display: flex; flex-direction: column; }
+.pc.pop { border-color: var(--accent); position: relative; }
+.pc.pop::before { content: "Recommended"; position: absolute; top: -12px; left: 28px; background: var(--accent); color: #000; font-size: 11px; font-weight: 700; padding: 3px 12px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.03em; }
+.pc .tier { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-3); margin-bottom: 12px; }
+.pc .amt { font-size: 40px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.03em; }
+.pc .amt span { font-size: 15px; font-weight: 400; color: var(--fg-3); }
+.pc .dsc { font-size: 14px; color: var(--fg-2); margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.pc ul { list-style: none; padding: 0; flex: 1; display: flex; flex-direction: column; gap: 12px; margin-bottom: 28px; }
+.pc li { font-size: 14px; display: flex; gap: 10px; align-items: flex-start; color: var(--fg-2); }
+.pc li::before { content: "\2713"; color: var(--accent); font-weight: 700; flex: none; }
+.pc li.lk { color: var(--fg-3); }
+.pc li.lk::before { content: "\2715"; color: var(--fg-3); font-weight: 400; }
+.lk-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; background: var(--accent-dim); color: var(--accent); padding: 1px 6px; border-radius: 4px; margin-left: 4px; }
+.pc .save { display: inline-block; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-dim); padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
+
+/* FAQ */
+.faq { display: flex; flex-direction: column; max-width: 680px; }
+.faq details { border-bottom: 1px solid var(--line); }
+.faq summary { padding: 20px 0; font-weight: 600; cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 16px; font-size: 15px; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; font-size: 18px; color: var(--fg-3); font-family: var(--mono); }
+.faq details[open] summary::after { content: "\2212"; }
+.faq .ans { padding: 0 0 20px; font-size: 15px; color: var(--fg-2); line-height: 1.65; }
+
+/* CTA */
+.cta { text-align: center; padding-block: 80px; padding-inline: 40px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 16px; margin-block: 40px; }
+.cta h2 { font-size: clamp(24px, 3vw, 32px); margin-bottom: 14px; letter-spacing: -0.02em; }
+.cta p { color: var(--fg-2); margin-bottom: 28px; }
+.cta .acts { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+/* footer */
+footer { border-top: 1px solid var(--line); padding-block: 40px; margin-top: 40px; }
+.fi2 { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+.fl { display: flex; gap: 24px; }
+.fl a { color: var(--fg-3); font-size: 14px; }
+.fc { color: var(--fg-3); font-size: 13px; }
+
+@media (max-width: 768px) {
+  .hero { padding: 64px 0 56px; }
+  .hero h1 { font-size: 32px; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .scr-body { grid-template-columns: 1fr; }
+  .feats { grid-template-columns: 1fr; }
+  .steps { grid-template-columns: 1fr; gap: 24px; }
+  .pgrid { grid-template-columns: 1fr; }
+  .nl { gap: 14px; }
+  section { padding-block: 56px; }
+  .cta { padding-inline: 24px; padding-block: 48px; }
+  .cmp th, .cmp td { padding: 10px 14px; font-size: 13px; }
+}
+@media (max-width: 480px) { .stats { grid-template-columns: 1fr; } }
+</style>
+
+<nav>
+  <div class="ni w">
+    <div class="logo"><div class="lm">P</div> Pulse0</div>
+    <div class="nl">
+      <a href="#features">Features</a>
+      <a href="#compare">Compare</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/pulse0/pulse0" class="btn bo bs">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<div class="w">
+
+<section class="hero">
+  <div class="hb"><span class="d"></span> OpenTelemetry native &middot; Self-hosted &middot; BSL licensed</div>
+  <h1>Full-stack observability.<br>One binary. <span class="em">Start free.</span></h1>
+  <p class="sub">Traces, logs, metrics, service map, alerts, SLOs, dashboards, and an AI assistant. Deploy in five minutes. Upgrade when you need more.</p>
+  <div class="acts">
+    <a href="#install" class="btn bp">Deploy free</a>
+    <a href="#compare" class="btn bo">Free vs Pro</a>
+  </div>
+</section>
+
+<div class="stats">
+  <div class="st"><div class="n">1</div><div class="l">Binary to deploy</div></div>
+  <div class="st"><div class="n g">3</div><div class="l">Signals unified</div></div>
+  <div class="st"><div class="n">15</div><div class="l">Alert templates</div></div>
+  <div class="st"><div class="n g">0</div><div class="l">External dependencies</div></div>
+</div>
+
+<div class="scr">
+  <div class="scr-bar"><span></span><span></span><span></span></div>
+  <div class="scr-body">
+    <div class="sp">
+      <div class="sp-h">Services &mdash; RED metrics</div>
+      <div class="sr"><span class="nm">frontend</span><span class="vl">1.35 rps</span><span class="pl pg">healthy</span></div>
+      <div class="sr"><span class="nm">cart-service</span><span class="vl">0.04 rps</span><span class="pl pg">healthy</span></div>
+      <div class="sr"><span class="nm">payment</span><span class="vl">0.12 rps</span><span class="pl pg">healthy</span></div>
+      <div class="sr"><span class="nm">checkout</span><span class="vl">0.01 rps</span><span class="pl pr">critical</span></div>
+      <div class="sr"><span class="nm">shipping</span><span class="vl">0.00 rps</span><span class="pl pr">critical</span></div>
+    </div>
+    <div class="sp">
+      <div class="sp-h">Live Insights</div>
+      <div class="sr"><span class="nm" style="color:var(--err)">&#9650; checkout failing</span><span class="vl">100%</span></div>
+      <div class="sr"><span class="nm" style="color:var(--warn)">&#9650; shipping errors</span><span class="vl">100%</span></div>
+      <div class="sr"><span class="nm" style="color:var(--warn)">&#9650; latency spike</span><span class="vl">37.9s</span></div>
+      <div class="sr"><span class="nm" style="color:var(--accent)">&#9679; flagd stable</span><span class="vl">0.00%</span></div>
+    </div>
+    <div class="sp">
+      <div class="sp-h">SLOs &mdash; Error budget</div>
+      <div class="sr"><span class="nm">Frontend 99.5%</span><span class="vl" style="color:var(--err)">96.7%</span></div>
+      <div class="bar"><i class="fr" style="width:100%"></i></div>
+      <div class="sr" style="margin-top:10px"><span class="nm">Cart 95%</span><span class="vl" style="color:var(--accent)">98.9%</span></div>
+      <div class="bar"><i class="fg" style="width:23%"></i></div>
+      <div class="sr" style="margin-top:10px"><span class="nm">Payment 99%</span><span class="vl" style="color:var(--accent)">100%</span></div>
+      <div class="bar"><i class="fg" style="width:0%"></i></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ FEATURES ============ -->
+<section id="features">
+  <div class="sl">Features</div>
+  <h2 class="st2">Everything you need. Nothing you don't.</h2>
+  <p class="ss">No agents, no sidecars, no external databases. One binary replaces your entire observability stack.</p>
+  <div class="feats">
+    <div class="ft"><div class="fi">&#8644;</div><h3>Distributed traces</h3><p>Full waterfall view with span attributes, error details, and correlated logs. Click any trace to see the exact call chain across services.</p></div>
+    <div class="ft"><div class="fi">&#9783;</div><h3>Structured logs</h3><p>Faceted log search with severity filtering. Logs link to their parent trace automatically.</p></div>
+    <div class="ft"><div class="fi">&#9673;</div><h3>Service map</h3><p>Auto-generated dependency graph from your traces. See request rates, error rates, and p95 latency on every edge.</p></div>
+    <div class="ft"><div class="fi">&#9636;</div><h3>Custom dashboards</h3><p>Drag-and-drop builder. Chart any OTel metric or service traffic signal. Stat tiles, area, line, and bar charts.</p></div>
+    <div class="ft"><div class="fi">&#9888;</div><h3>Alerts with templates</h3><p>15 one-click alert templates for error rate, latency, traffic drop, log bursts, CPU, memory. Webhook support.</p></div>
+    <div class="ft"><div class="fi">&#9201;</div><h3>SLOs + error budgets</h3><p>Define availability and latency targets per service. Track attainment and error budget burn in real time.</p></div>
+    <div class="ft"><div class="fi">&#10024;</div><h3>Live Insights</h3><p>Rule-based anomaly detection finds issues without configuration. Traffic drops, error spikes, and latency regressions surface automatically.</p></div>
+    <div class="ft"><div class="fi">&#9881;</div><h3>AI assistant <span class="lk-tag">Pro</span></h3><p>"Why is checkout failing?" &mdash; ask in plain English. The assistant queries your traces, logs, and metrics with 10 read-only tools.</p></div>
+    <div class="ft"><div class="fi">&#127760;</div><h3>Synthetic monitoring</h3><p>HTTP health checks on a schedule. Get alerted when an endpoint goes down before your users notice.</p></div>
+  </div>
+</section>
+
+<!-- ============ COMPARISON ============ -->
+<section id="compare">
+  <div class="sl">Community vs Pro</div>
+  <h2 class="st2">Start free. Upgrade when your team grows.</h2>
+  <p class="ss">Community gives you real observability for small teams. Pro removes every limit and adds enterprise features.</p>
+
+  <div class="cmp">
+    <div class="cmp-wrap">
+    <table>
+      <thead>
+        <tr><th style="min-width:180px">Feature</th><th>Community (free)</th><th class="pro-col">Pro ($490/year)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Traces, logs, metrics</td><td class="ck">&#10003;</td><td class="ck pro-col">&#10003;</td></tr>
+        <tr><td>Service map + health</td><td class="ck">&#10003;</td><td class="ck pro-col">&#10003;</td></tr>
+        <tr><td>Live Insights</td><td class="ck">&#10003;</td><td class="ck pro-col">&#10003;</td></tr>
+        <tr><td>Services monitored</td><td>5 max</td><td class="pro-col">Unlimited</td></tr>
+        <tr><td>Data retention</td><td>7 days</td><td class="pro-col">Unlimited</td></tr>
+        <tr><td>Dashboards</td><td>3 max</td><td class="pro-col">Unlimited</td></tr>
+        <tr><td>Alert rules</td><td>3 max</td><td class="pro-col">Unlimited</td></tr>
+        <tr><td>SLOs</td><td>1 max</td><td class="pro-col">Unlimited</td></tr>
+        <tr><td>Synthetic checks</td><td>1 max</td><td class="pro-col">Unlimited</td></tr>
+        <tr><td>SSO / OIDC</td><td class="lk">&#10005;</td><td class="ck pro-col">&#10003;</td></tr>
+        <tr><td>Team RBAC + roles</td><td class="lk">&#10005;</td><td class="ck pro-col">&#10003;</td></tr>
+        <tr><td>Audit log</td><td class="lk">&#10005;</td><td class="ck pro-col">&#10003;</td></tr>
+        <tr><td>AI assistant (Claude)</td><td class="lk">&#10005;</td><td class="ck pro-col">&#10003;</td></tr>
+        <tr><td>Postgres backend</td><td class="lk">&#10005;</td><td class="ck pro-col">&#10003;</td></tr>
+        <tr><td>Alert templates (15)</td><td class="ck">&#10003;</td><td class="ck pro-col">&#10003;</td></tr>
+        <tr><td>Support</td><td>Community</td><td class="pro-col">Email + Slack</td></tr>
+        <tr><td>License</td><td>BSL</td><td class="pro-col">Commercial</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HOW IT WORKS ============ -->
+<section id="how">
+  <div class="sl">How it works</div>
+  <h2 class="st2">Three steps to complete observability</h2>
+  <p class="ss">No infrastructure to provision. No configuration files to write.</p>
+  <div class="steps">
+    <div class="stp"><h3>Deploy Pulse0</h3><p>Run a single Docker command, apply a Helm chart, or download the binary. Starts in seconds with zero config.</p></div>
+    <div class="stp"><h3>Point your OTLP endpoint</h3><p>Set <code>OTEL_EXPORTER_OTLP_ENDPOINT</code> to your Pulse0 instance. Any OpenTelemetry SDK or Collector works out of the box.</p></div>
+    <div class="stp"><h3>See everything</h3><p>Traces, logs, metrics, service map, and Live Insights appear immediately. Create dashboards, SLOs, and alerts from the UI.</p></div>
+  </div>
+</section>
+
+<!-- ============ INSTALL ============ -->
+<section id="install">
+  <div class="sl">Get started</div>
+  <h2 class="st2">Deploy in under five minutes</h2>
+  <p class="ss">Every deployment starts as Community (free). Add a license key to unlock Pro.</p>
+  <div class="iwrap">
+    <div class="itabs">
+      <button class="active" onclick="showTab(0)">Docker</button>
+      <button onclick="showTab(1)">Kubernetes</button>
+      <button onclick="showTab(2)">Docker Compose</button>
+      <button onclick="showTab(3)">Binary</button>
+    </div>
+    <div class="ip active">
+      <pre><span class="c"># Run Pulse0 with persistent storage</span>
+docker run -d --name pulse0 \
+  -p 4318:4318 \
+  -v pulse0-data:/data \
+  pulse0/pulse0:latest
+
+<span class="c"># Upgrade to Pro: add your license key</span>
+docker run -d --name pulse0 \
+  -p 4318:4318 \
+  -v pulse0-data:/data \
+  -e PULSE0_LICENSE_KEY=PULSE0-XXXX-XXXX-XXXX-XXXXXXXX \
+  pulse0/pulse0:latest</pre>
+      <p class="nt">Data persists in the <code>pulse0-data</code> volume. The UI and OTLP endpoint share port 4318.</p>
+    </div>
+    <div class="ip">
+      <pre><span class="c"># Add the Helm repo and install (Community)</span>
+helm repo add pulse0 https://charts.pulse0.dev
+helm repo update
+helm install pulse0 pulse0/pulse0 \
+  --namespace observability \
+  --create-namespace \
+  --set auth.token=YOUR_TOKEN
+
+<span class="c"># Upgrade to Pro: set your license key</span>
+helm upgrade pulse0 pulse0/pulse0 \
+  --set license.key=PULSE0-XXXX-XXXX-XXXX-XXXXXXXX</pre>
+    </div>
+    <div class="ip">
+      <pre><span class="c"># Download and start</span>
+curl -O https://get.pulse0.dev/docker-compose.yml
+docker compose up -d
+
+<span class="c"># To activate Pro, add to .env:</span>
+PULSE0_LICENSE_KEY=PULSE0-XXXX-XXXX-XXXX-XXXXXXXX</pre>
+    </div>
+    <div class="ip">
+      <pre><span class="c"># Download and run directly</span>
+pip install -r requirements.txt
+python server.py
+
+<span class="c"># Pro: set the env var before starting</span>
+export PULSE0_LICENSE_KEY=PULSE0-XXXX-XXXX-XXXX-XXXXXXXX
+python server.py</pre>
+    </div>
+  </div>
+  <div style="margin-top:28px; background:var(--bg-2); border:1px solid var(--line); border-radius:12px; padding:28px">
+    <h4 style="margin-bottom:14px; font-size:15px">Then connect your application</h4>
+    <pre style="background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:20px 24px; overflow-x:auto; font-size:14px; line-height:1.8; font-family:var(--mono); color:var(--accent); min-width:0"><span class="c"># Set these env vars on any OpenTelemetry-instrumented service</span>
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+
+<span class="c"># Open http://localhost:4318 to see your data.</span></pre>
+  </div>
+</section>
+
+<!-- ============ PRICING ============ -->
+<section id="pricing">
+  <div class="sl">Pricing</div>
+  <h2 class="st2">Simple pricing. No per-host fees. No usage meters.</h2>
+  <p class="ss">Your data stays on your infrastructure. You pay for the software, not for how much you use it.</p>
+  <div class="pgrid">
+    <div class="pc">
+      <div class="tier">Community</div>
+      <div class="amt">$0 <span>/forever</span></div>
+      <div class="dsc">Real observability for small teams. Monitor up to 5 services free.</div>
+      <ul>
+        <li>Traces, logs, and metrics</li>
+        <li>Up to <strong>5 services</strong></li>
+        <li><strong>7-day</strong> data retention</li>
+        <li>3 dashboards, 3 alerts, 1 SLO</li>
+        <li>1 synthetic check</li>
+        <li>Service map + health scores</li>
+        <li>Live Insights</li>
+        <li>SQLite backend</li>
+        <li>Community support</li>
+        <li class="lk">SSO / RBAC</li>
+        <li class="lk">AI assistant</li>
+        <li class="lk">Postgres backend</li>
+        <li class="lk">Audit log</li>
+      </ul>
+      <a href="#install" class="btn bo" style="width:100%;justify-content:center">Get started free</a>
+    </div>
+    <div class="pc pop">
+      <div class="tier">Pro</div>
+      <div class="amt">$490 <span>/year</span><span class="save">Under $41/mo</span></div>
+      <div class="dsc">Unlimited everything. Enterprise features. One flat price for your whole team.</div>
+      <ul>
+        <li><strong>Unlimited</strong> services</li>
+        <li><strong>Unlimited</strong> data retention</li>
+        <li><strong>Unlimited</strong> dashboards, alerts, SLOs</li>
+        <li><strong>Unlimited</strong> synthetic checks</li>
+        <li>SSO / OIDC integration</li>
+        <li>Team RBAC (viewer / editor / admin)</li>
+        <li>Full audit log</li>
+        <li>AI assistant (Claude-powered)</li>
+        <li>Postgres backend support</li>
+        <li>15 alert templates</li>
+        <li>Priority email + Slack support</li>
+        <li>Commercial license</li>
+      </ul>
+      <a href="https://pulse0.dev/buy" class="btn bp" style="width:100%;justify-content:center">Get Pro</a>
+    </div>
+    <div class="pc">
+      <div class="tier">Cloud</div>
+      <div class="amt">Soon</div>
+      <div class="dsc">We run it. You send telemetry. Zero ops. Join the waitlist.</div>
+      <ul>
+        <li>Everything in Pro</li>
+        <li>Fully managed infrastructure</li>
+        <li>Automatic upgrades + backups</li>
+        <li>99.9% uptime SLA</li>
+        <li>Multi-tenant isolation</li>
+        <li>Data residency options</li>
+        <li>Dedicated support channel</li>
+        <li>Custom retention policies</li>
+      </ul>
+      <a href="https://pulse0.dev/waitlist" class="btn bo" style="width:100%;justify-content:center">Join waitlist</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section id="faq">
+  <div class="sl">FAQ</div>
+  <h2 class="st2">Common questions</h2>
+  <div class="faq" style="margin-top:36px">
+    <details><summary>What's the difference between Community and Pro?</summary><div class="ans">Community monitors up to 5 services with 7-day retention, 3 dashboards, 3 alerts, and 1 SLO. It's real observability, not a trial. Pro removes every limit and adds SSO, RBAC, audit logging, the AI assistant, and Postgres support. Both are self-hosted and run the same binary.</div></details>
+    <details><summary>Why $490/year?</summary><div class="ans">At $490 you're under most companies' $500 procurement threshold, so engineers can approve it without a purchasing process. It's flat: no per-host fees, no per-seat charges, no usage meters. One key covers your whole team.</div></details>
+    <details><summary>Can I try Pro before buying?</summary><div class="ans">Deploy Community and use it with real data. When you hit a limit (6th service, 4th dashboard, need SSO), you'll see exactly what Pro unlocks. Buy a key and set it in your environment to upgrade instantly with no data loss.</div></details>
+    <details><summary>What's a BSL license?</summary><div class="ans">Business Source License means the code is visible and you can use it freely, but you cannot resell it or offer it as a hosted service competing with Pulse0. After four years, each version converts to Apache 2.0.</div></details>
+    <details><summary>How much traffic can it handle?</summary><div class="ans">A single instance handles around 2,500 spans/second on a 2-vCPU machine. For most teams with up to 50 services, that's more than enough. The Cloud tier will add horizontal scaling.</div></details>
+    <details><summary>Is it OpenTelemetry compatible?</summary><div class="ans">Native OTLP HTTP on port 4318. Any OpenTelemetry SDK or Collector can send traces, logs, and metrics directly. Supports both JSON and Protobuf encoding.</div></details>
+    <details><summary>Can I use my own Postgres?</summary><div class="ans">On Pro, set <code>PULSE0_DATABASE_URL</code> to any Postgres connection string. Community uses SQLite only. Both backends support the same features.</div></details>
+    <details><summary>What happens to my data?</summary><div class="ans">Your data stays on your infrastructure, always. Community and Pro are self-hosted. Data never leaves your network and there's no phone-home.</div></details>
+  </div>
+</section>
+
+<div class="cta">
+  <h2>Start monitoring in five minutes</h2>
+  <p>Deploy free. Upgrade when your team needs more.</p>
+  <div class="acts">
+    <a href="#install" class="btn bp">Deploy free</a>
+    <a href="#compare" class="btn bo">Compare plans</a>
+  </div>
+</div>
+
+</div>
+
+<footer>
+  <div class="w">
+    <div class="fi2">
+      <div class="logo" style="font-size:15px"><div class="lm" style="width:24px;height:24px;font-size:12px;border-radius:6px">P</div> Pulse0</div>
+      <div class="fl">
+        <a href="https://github.com/pulse0/pulse0">GitHub</a>
+        <a href="#install">Docs</a>
+        <a href="#pricing">Pricing</a>
+      </div>
+      <div class="fc">&copy; 2024 Pulse0. BSL licensed.</div>
+    </div>
+  </div>
+</footer>
+
+<script>
+function showTab(i) {
+  document.querySelectorAll('.itabs button').forEach(function(b, j) { b.classList.toggle('active', j === i); });
+  document.querySelectorAll('.ip').forEach(function(p, j) { p.classList.toggle('active', j === i); });
+}
+</script>

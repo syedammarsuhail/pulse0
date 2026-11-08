@@ -61,11 +61,26 @@
   // ---------------------------------------------------------------- start: learn the mode before the rail is built
   const origStart = P.start;
   P.start = async function () {
-    try { const m = await (await fetch("/api/mode")).json(); P.mode = m.mode; P.features = m.features || {}; } catch { /* old server: selfhosted */ }
+    try {
+      const m = await (await fetch("/api/mode")).json();
+      P.mode = m.mode; P.features = m.features || {};
+      P.tier = m.tier || "community"; P.isPro = !!m.is_pro; P.tierLimits = m.limits || null;
+    } catch { /* old server: selfhosted */ }
+    if (!P.isPro) document.body.classList.add("community");
     const cfg = P.NAV.find(g => g[0] === "Configure")[1];
     cfg.unshift(["play", "Get started", "#/onboarding"]);
     if (hosted()) cfg.unshift(["services", "Organization", "#/organization"]);
     origStart();
+    if (!P.isPro) {
+      const gated = new Set(["slo", "synth"]);
+      document.querySelectorAll("#rail a").forEach(a => {
+        const ic = (a.dataset.path || "").replace(/^\//, "").split("/")[0];
+        if (gated.has(ic) || ic === "slos" || ic === "synthetics") {
+          a.classList.add("gated");
+          a.append(el("span", { class: "lock-badge" }, "PRO"));
+        }
+      });
+    }
     firstRun();
   };
 
@@ -327,6 +342,17 @@ service:
       const rows = [["Mode", MODES[P.mode] || P.mode], ["Data lives", hosted() ? "On Pulse infrastructure, one database per project" : "In your own cluster / volume"],
         ["Organizations", hosted() ? "enabled" : "not used (single workspace)"], ["Quotas & retention", hosted() ? "per organization, set by the operator" : "PULSE0_RETENTION_HOURS"],
         ["Claude assistant", P.features.ai_assistant ? "enabled (query snippets go to Anthropic)" : "off"]];
+      const tierRows = P.isPro
+        ? [["Plan", "Pro"], ["Services", "Unlimited"], ["Retention", "Unlimited"], ["Dashboards", "Unlimited"], ["Alerts", "Unlimited"], ["SLOs", "Unlimited"], ["Synthetics", "Unlimited"]]
+        : [["Plan", "Community (free)"],
+           ["Services", `${P.tierLimits?.max_services || 5} max`], ["Retention", `${P.tierLimits?.retention_days || 7} days`],
+           ["Dashboards", `${P.tierLimits?.max_dashboards || 3} max`], ["Alerts", `${P.tierLimits?.max_alerts || 3} max`],
+           ["SLOs", `${P.tierLimits?.max_slos || 1} max`], ["Synthetics", `${P.tierLimits?.max_synthetics || 1} max`]];
+      grid.prepend(panel("Plan", el("div", { class: "col" },
+        el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" },
+          pill(P.isPro ? "Pro" : "Community", P.isPro ? "ok" : ""),
+          !P.isPro ? el("button", { class: "btn sm primary", on: { click: () => P.upgradeModal({ error: "pro_required", feature: "Pro features" }) } }, "Upgrade to Pro") : null),
+        el("div", { class: "kv", style: "margin:0 -14px" }, ...tierRows.flat().map(x => el("div", {}, x))))));
       grid.prepend(panel("Deployment mode", el("div", { class: "col" },
         el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, pill(MODES[P.mode] || P.mode, hosted() ? "info" : "ok"), el("a", { class: "btn sm", href: "#/onboarding" }, "Compare modes & connect apps"), hosted() ? el("a", { class: "btn sm", href: "#/organization" }, "Organization") : null),
         el("div", { class: "kv", style: "margin:0 -14px" }, ...rows.flat().map(x => el("div", {}, x))),

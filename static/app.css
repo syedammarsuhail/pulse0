@@ -319,3 +319,23 @@ pre.code{margin:0;background:var(--code);border:1px solid var(--line);border-rad
 
 [hidden]{display:none!important}
 .insight .explain.icon{width:28px;padding:0;justify-content:center}
+
+/* ---- upgrade modal ---- */
+.upgrade-modal{display:flex;flex-direction:column;gap:16px;text-align:center}
+.um-icon{display:flex;justify-content:center;color:var(--accent-2)}
+.um-icon svg{width:48px;height:48px;filter:drop-shadow(0 0 12px var(--accent-2))}
+.um-desc{font-size:15px;color:var(--text);line-height:1.5}
+.upgrade-benefits{display:flex;flex-direction:column;gap:8px;text-align:left;padding:12px 0}
+.ub-row{display:flex;gap:10px;align-items:flex-start}
+.ub-check{flex:none;width:22px;height:22px;border-radius:50%;background:var(--ok);color:#fff;display:flex;align-items:center;justify-content:center}
+.ub-check svg{width:13px;height:13px}
+.ub-title{font-weight:600;font-size:13px;color:var(--text)}
+.ub-desc{font-size:12px;color:var(--text-3);margin-top:1px}
+.upgrade-price{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:center;gap:4px 8px}
+.up-amount{font-size:28px;font-weight:700;color:var(--accent-2)}
+.up-period{font-size:14px;color:var(--text-2)}
+.up-note{width:100%;font-size:12px;color:var(--text-3);margin-top:4px}
+.um-key{border-top:1px solid var(--line);padding-top:12px}
+/* nav lock badge for community tier */
+#rail a .lock-badge{display:none;margin-left:auto;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:var(--accent-2);color:#fff;letter-spacing:.3px}
+body.community #rail a.gated .lock-badge{display:inline}

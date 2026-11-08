@@ -1,0 +1,5 @@
+# Add this as .gitignore in the PUBLIC repository to exclude the enterprise module.
+# The enterprise/ directory lives in a PRIVATE repo and is overlaid at build time.
+*
+!.gitignore-public
+!README.md
