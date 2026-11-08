@@ -115,6 +115,11 @@ PYEOF
   done
   [ "$st" = "SUCCEEDED" ] || { echo "image build failed: $st" >&2; exit 1; }
   rm -rf "$tmp"
+
+  if [ -d test-apps/shop ] && [ "${SKIP_SHOP:-0}" != "1" ]; then
+    say "Building shop demo images"
+    bash test-apps/shop/build.sh
+  fi
 }
 
 ensure_cluster() {
