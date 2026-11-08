@@ -950,6 +950,7 @@ def services(minutes: float = 60):
 
 @app.get("/api/services/{svc}/timeseries")
 def service_ts(svc: str, minutes: float = 60, buckets: int = Query(60, ge=1, le=1000)):
+    buckets = max(1, min(int(buckets), 1000))
     t0 = since_ns(minutes)
     w = int(minutes * 60 * 1e9 / buckets)
     rows = q("""SELECT (start_ns-?)/? b, COUNT(*) n, SUM(status=2) err, AVG(dur_ms) avg_ms
@@ -1097,6 +1098,7 @@ def logs(minutes: float = 60, service: str = "", min_severity: int = 0, q_: str 
 
 @app.get("/api/logs/histogram")
 def logs_hist(minutes: float = 60, service: str = "", buckets: int = Query(60, ge=1, le=1000)):
+    buckets = max(1, min(int(buckets), 1000))
     t0 = since_ns(minutes); w = int(minutes * 60 * 1e9 / buckets)
     where, args = ["ts_ns>=?"], [t0]
     if service:
@@ -1115,6 +1117,7 @@ def metric_names():
 
 
 def _metric_series(name, service, minutes, buckets, agg, group_by=""):
+    buckets = max(1, min(int(buckets), 1000))
     t0 = since_ns(minutes); w = int(minutes * 60 * 1e9 / buckets)
     fn = {"avg": "AVG", "max": "MAX", "min": "MIN", "sum": "SUM", "count": "COUNT"}.get(agg, "AVG")
     where, args = ["name=?", "ts_ns>=?"], [name, t0]
@@ -1536,6 +1539,7 @@ def insights(minutes: float = 60):
 @app.get("/api/home")
 @ttl_cached
 def home(minutes: float = 60, buckets: int = Query(60, ge=1, le=1000)):
+    buckets = max(1, min(int(buckets), 1000))
     t0 = since_ns(minutes)
     w = int(minutes * 60 * 1e9 / buckets)
     rows = q("""SELECT (start_ns-?)/? b, COUNT(*) n, SUM(status=2) err FROM spans
