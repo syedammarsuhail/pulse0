@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   snyk-python:
@@ -27,17 +26,11 @@ jobs:
 
       - name: Run Snyk Open Source (Python dependencies)
         uses: snyk/actions/python-3.10@master
-        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --severity-threshold=high --sarif-file-output=snyk-python.sarif
-
-      - name: Upload Snyk Python results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: snyk-python.sarif
+          args: --severity-threshold=high
+          command: monitor
 
   snyk-container:
     runs-on: ubuntu-latest
@@ -49,18 +42,12 @@ jobs:
 
       - name: Run Snyk Container (Docker image)
         uses: snyk/actions/docker@master
-        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
           image: pulse0:scan
-          args: --severity-threshold=high --sarif-file-output=snyk-container.sarif
-
-      - name: Upload Snyk Container results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: snyk-container.sarif
+          args: --severity-threshold=high
+          command: monitor
 
   snyk-code:
     runs-on: ubuntu-latest
@@ -69,15 +56,8 @@ jobs:
 
       - name: Run Snyk Code (SAST)
         uses: snyk/actions/python-3.10@master
-        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
           command: code test
-          args: --sarif-file-output=snyk-code.sarif
-
-      - name: Upload Snyk Code results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: snyk-code.sarif
+          args: --severity-threshold=high
