@@ -2216,11 +2216,15 @@ def _delete_project(pid):
     if h:  # close under its lock so the file can be removed (Windows keeps open files locked)
         with h[1]:
             h[0].close()
+    base = os.path.realpath(os.path.join(DATA_DIR, "projects"))
     for sfx in ("", "-wal", "-shm"):
+        target = os.path.realpath(path + sfx)
+        if os.path.commonpath([base, target]) != base:
+            continue
         try:
-            os.remove(path + sfx)
+            os.remove(target)
         except OSError as e:
-            print("could not remove", path + sfx, e)
+            print("could not remove", target, e)
 
 
 def _need_org(org_id):
@@ -2454,6 +2458,8 @@ _disc = {"at": 0.0, "doc": None}
 
 def _idp_request(url, form=None, headers=None):
     """GET (or form-POST) JSON from the identity provider. Tests replace this with a fake IdP."""
+    if urllib.parse.urlparse(url).scheme not in ("http", "https"):
+        raise ValueError("IdP url must be http(s)")
     data = urllib.parse.urlencode(form).encode() if form is not None else None
     req = urllib.request.Request(url, data=data, headers={"Accept": "application/json", **(headers or {})})
     with urllib.request.urlopen(req, timeout=10) as r:
