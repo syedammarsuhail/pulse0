@@ -1120,8 +1120,13 @@ def _metric_series(name, service, minutes, buckets, agg, group_by=""):
     where, args = ["name=?", "ts_ns>=?"], [name, t0]
     if service:
         where.append("service=?"); args.append(service)
-    g = f", json_extract(attrs, '$.\"{group_by}\"') grp" if group_by else ", service grp"
-    rows = q(f"SELECT (ts_ns-?)/? b{g}, {fn}(value) v FROM metrics WHERE {' AND '.join(where)} GROUP BY b, grp", (t0, w, *args))
+    if group_by:
+        g = ", json_extract(attrs, ?) grp"
+        g_args = (f'$."{group_by}"',)
+    else:
+        g = ", service grp"
+        g_args = ()
+    rows = q(f"SELECT (ts_ns-?)/? b{g}, {fn}(value) v FROM metrics WHERE {' AND '.join(where)} GROUP BY b, grp", (t0, w, *g_args, *args))
     series = {}
     for r in rows:
         series.setdefault(str(r["grp"]), {})[r["b"]] = r["v"]
