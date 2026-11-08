@@ -20,7 +20,11 @@ ROLE=pulse0-e2e-codebuild
 CB_PROJ=pulse0-e2e-build
 TOKEN="${PULSE0_TOKEN:-demo-token-2024}"
 TAG="${IMAGE_TAG:-$(git rev-parse --short HEAD 2>/dev/null || echo latest)}"
-PY="$(command -v python3 || command -v python)"
+PY=""
+for c in python3 python; do
+  if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys' >/dev/null 2>&1; then PY="$c"; break; fi
+done
+[ -n "$PY" ] || { echo "missing tool: a working python" >&2; exit 1; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
