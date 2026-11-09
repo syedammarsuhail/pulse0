@@ -1,0 +1,40 @@
+# Pulse0 on a single Linux VM: server + a host-level OpenTelemetry Collector.
+#   cp .env.example .env     # set PULSE0_TOKEN (and PULSE0_IMAGE if you use a private registry)
+#   docker compose up -d
+# UI and OTLP/HTTP: http://<vm-ip>:4318   Apps can also send to the collector on :4317 (gRPC) / :4319 (HTTP).
+services:
+  pulse0:
+    image: ${PULSE0_IMAGE:-pulse0:0.1.0}
+    restart: unless-stopped
+    ports:
+      - "4318:4318"
+    environment:
+      PULSE0_TOKEN: ${PULSE0_TOKEN:?set PULSE0_TOKEN in .env}
+      PULSE0_RETENTION_HOURS: ${PULSE0_RETENTION_HOURS:-72}
+      PULSE0_DB: /data/pulse0.db
+    volumes:
+      - pulse0-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4318/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      PULSE0_TOKEN: ${PULSE0_TOKEN}
+    ports:
+      - "4317:4317"
+      - "4319:4319"
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - /:/hostfs:ro
+    depends_on:
+      pulse0:
+        condition: service_healthy
+
+volumes:
+  pulse0-data:

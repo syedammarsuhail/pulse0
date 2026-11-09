@@ -1,0 +1,51 @@
+# Host-level collector for a single VM: CPU, memory, disk, network, load, plus any OTLP your apps send it.
+receivers:
+  otlp:
+    protocols:
+      grpc: { endpoint: 0.0.0.0:4317 }
+      http: { endpoint: 0.0.0.0:4319 }
+  hostmetrics:
+    root_path: /hostfs
+    collection_interval: 30s
+    scrapers:
+      cpu: {}
+      memory: {}
+      load: {}
+      disk: {}
+      filesystem: {}
+      network: {}
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  resourcedetection:
+    detectors: [system]
+    system:
+      hostname_sources: [os]
+  resource/host:
+    attributes:
+      - { key: service.name, value: host-metrics, action: insert }
+  batch: {}
+
+exporters:
+  otlphttp/pulse0:
+    endpoint: http://pulse0:4318
+    headers:
+      Authorization: "Bearer ${env:PULSE0_TOKEN}"
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp, hostmetrics]
+      processors: [memory_limiter, resourcedetection, resource/host, batch]
+      exporters: [otlphttp/pulse0]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/pulse0]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/pulse0]

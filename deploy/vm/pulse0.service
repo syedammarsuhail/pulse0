@@ -1,0 +1,22 @@
+# systemd unit for running Pulse0 without Docker. See ON-PREM.md, "VM without Docker".
+[Unit]
+Description=Pulse0 observability server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pulse0
+Group=pulse0
+WorkingDirectory=/opt/pulse0
+EnvironmentFile=/etc/pulse0/pulse0.env
+ExecStart=/opt/pulse0/venv/bin/python -u server.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/pulse0
+
+[Install]
+WantedBy=multi-user.target

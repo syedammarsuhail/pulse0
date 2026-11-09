@@ -177,6 +177,10 @@ spec:
         {{- include "pulse0.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "pulse0.fullname" . }}-collector
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: otelcol
           image: {{ .Values.collector.image }}
@@ -269,6 +273,10 @@ spec:
         {{- include "pulse0.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "pulse0.fullname" . }}-collector
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: otelcol
           image: {{ .Values.collector.image }}

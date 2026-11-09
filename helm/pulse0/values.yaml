@@ -5,6 +5,11 @@ image:
   tag: "0.1.0"
   pullPolicy: IfNotPresent
 
+# Private registry? Create the secret first:
+#   kubectl -n observability create secret docker-registry regcred --docker-server=<registry> --docker-username=<u> --docker-password=<p>
+# then: --set imagePullSecrets[0].name=regcred
+imagePullSecrets: []
+
 replicaCount: 1  # Pulse0 uses SQLite; keep at 1 (scale via multiple instances + external LB if needed)
 
 service:
