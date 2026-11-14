@@ -47,6 +47,13 @@ try:
 except ImportError:
     _LICENSE_VALID = bool(_LICENSE_KEY)
 
+# Sovereign / data-residency mode. When on, Pulse0 makes ZERO outbound calls to any third-party
+# vendor: in particular the Claude "Ask Pulse0" assistant is hard-disabled, so telemetry can never
+# reach Anthropic, regardless of whether ANTHROPIC_API_KEY is set. Operator-configured endpoints
+# that live inside the customer's own network — their OIDC identity provider (SSO), their alert
+# webhooks, their synthetic-check targets — are unaffected; Pulse0 never phones home on its own.
+SOVEREIGN = os.environ.get("PULSE0_SOVEREIGN", "").strip().lower() in ("1", "true", "yes", "on")
+
 TRIAL_DAYS = 14
 _TRIAL_START = 0
 _TRIAL_ACTIVE = False
@@ -101,6 +108,9 @@ def _print_tier():
             print("Pulse0 Community tier (Pro trial expired, set PULSE0_LICENSE_KEY to upgrade)")
         else:
             print("Pulse0 Community tier (set PULSE0_LICENSE_KEY to activate Pro)")
+
+if SOVEREIGN:
+    print("Pulse0 Sovereign mode ON: no outbound vendor calls; Claude assistant disabled; telemetry stays in your environment")
 
 # Community-tier limits (Pro is unlimited)
 TIER_LIMITS = {
@@ -1762,6 +1772,9 @@ AI_TOOLS = [
 
 
 def _ai_key():
+    # Sovereign/data-residency mode: never contact Anthropic, even if a key is configured.
+    if SOVEREIGN:
+        return ""
     # Hosted mode serves many tenants from one process: never forward their telemetry to Anthropic
     # with the platform's key unless the operator explicitly opts in.
     if HOSTED and os.environ.get("PULSE0_HOSTED_AI") != "1":
@@ -2670,7 +2683,8 @@ def api_mode():
             "limits": TIER_LIMITS if not IS_PRO else None,
             "trial": trial,
             "features": {"multi_tenant": HOSTED, "organizations": HOSTED, "quotas": HOSTED,
-                         "admin_api": HOSTED, "ai_assistant": IS_PRO and bool(_ai_key()),
+                         "admin_api": HOSTED, "sovereign": SOVEREIGN,
+                         "ai_assistant": IS_PRO and bool(_ai_key()),
                          "sso": IS_PRO, "rbac": IS_PRO, "postgres": IS_PRO or USE_PG,
                          "unlimited_dashboards": IS_PRO, "unlimited_alerts": IS_PRO,
                          "unlimited_slos": IS_PRO, "unlimited_services": IS_PRO}}

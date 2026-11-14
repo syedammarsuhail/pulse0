@@ -1,0 +1,57 @@
+# Pulse0 on Google GKE — overlay values.
+# helm install pulse0 ./helm/pulse0 -n observability --create-namespace -f values-gke.yaml
+
+image:
+  repository: <region>-docker.pkg.dev/<project>/<repo>/pulse0   # push to Artifact Registry
+  tag: "0.1.0"
+
+# GKE persistent disks via the pd.csi.storage.gke.io CSI driver. Built-in StorageClasses:
+#   premium-rwo   (SSD persistent disk — use for heavier ingest; default below)
+#   standard-rwo  (balanced/HDD persistent disk — cheaper, slower)
+persistence:
+  enabled: true
+  size: 50Gi
+  storageClass: premium-rwo
+
+service:
+  type: ClusterIP
+
+# Expose via the GKE Ingress controller (class "gce" => an external HTTP(S) Load Balancer;
+# use "gce-internal" for an internal LB). A GCE Ingress needs a ClusterIP service whose
+# ports are backed by a readiness probe (the chart provides /readyz). To terminate TLS at
+# the LB, create a ManagedCertificate and reference it with the annotation shown.
+ingress:
+  enabled: true
+  className: gce
+  annotations:
+    kubernetes.io/ingress.class: gce
+    # networking.gke.io/managed-certificates: pulse0-cert   # if using a GKE ManagedCertificate
+  hosts:
+    - host: pulse0.internal.yourcompany.com
+      paths: [{ path: /, pathType: Prefix }]
+
+auth:
+  token: "set-via--set-or-secret-manager-csi"
+
+# Pulse0 stores telemetry in SQLite; scan-heavy dashboards need roughly the DB size in RAM
+# or large queries spill to disk and pages take 30-60s. Keep the limit at 2Gi+ (the chart's
+# 1Gi default is too low); give the pod about as much memory as the on-disk DB.
+resources:
+  limits:   { cpu: 1000m, memory: 2Gi }
+  requests: { cpu: 100m,  memory: 512Mi }
+
+env:
+  PULSE0_RETENTION_HOURS: "168"
+
+# The bundled collector picks up GKE cluster + GCE cloud attributes automatically
+# (gcp/gke resourcedetection). No Workload Identity needed for the basic setup;
+# it only reads the kubelet and K8s API via its ServiceAccount (RBAC is in the chart).
+collector:
+  enabled: true
+  resources:
+    limits: { cpu: 500m, memory: 512Mi }
+    requests: { cpu: 100m, memory: 128Mi }
+
+# Workload Identity is only needed later for Tier-3 GCS cold storage.
+# Then bind the pulse0 Kubernetes ServiceAccount to a GCP service account and
+# annotate it with iam.gke.io/gcp-service-account: pulse0@<project>.iam.gserviceaccount.com

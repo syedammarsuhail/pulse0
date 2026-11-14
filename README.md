@@ -60,14 +60,14 @@ Covers every endpoint, every validation rule, every rejection case, plus the Ser
 | `FEATURES-VS-DASH0.md` | Honest feature parity table. |
 | `test-apps/README.md` | 4-language zero-code test kit (`run-all.sh`). |
 
-## Three K8s flavors supported
+## Four K8s flavors supported
 
-| | EKS | AKS | Bare-metal / k3s |
-|---|---|---|---|
-| Registry | ECR | ACR | local load (kind/k3s) or private |
-| Storage | EBS → `gp3` | Azure Disk → `managed-csi-premium` | `local-path` / Longhorn / OpenEBS / Rook |
-| Expose UI | ALB Ingress | AGIC / ingress-nginx | NodePort / MetalLB / ingress-nginx |
-| Values file | `values-eks.yaml` | `values-aks.yaml` | `values-baremetal.yaml` |
+| | EKS | AKS | GKE | Bare-metal / k3s |
+|---|---|---|---|---|
+| Registry | ECR | ACR | Artifact Registry | local load (kind/k3s) or private |
+| Storage | EBS → `gp3` | Azure Disk → `managed-csi-premium` | PD CSI → `premium-rwo` | `local-path` / Longhorn / OpenEBS / Rook |
+| Expose UI | ALB Ingress | AGIC / ingress-nginx | GCE Ingress | NodePort / MetalLB / ingress-nginx |
+| Values file | `values-eks.yaml` | `values-aks.yaml` | `values-gke.yaml` | `values-baremetal.yaml` |
 
 Same Helm chart. Same code. The `deploy.sh` script detects which flavor you're on and does the right thing.
 

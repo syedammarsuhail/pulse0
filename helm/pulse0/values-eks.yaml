@@ -35,6 +35,13 @@ auth:
 env:
   PULSE0_RETENTION_HOURS: "168"
 
+# Pulse0 stores telemetry in SQLite; scan-heavy dashboards need roughly the DB size in RAM
+# or large queries spill to EBS and pages take 30-60s. Keep the limit at 2Gi+ (the chart's
+# 1Gi default is too low); size the pod to about the on-disk DB.
+resources:
+  limits:   { cpu: 1000m, memory: 2Gi }
+  requests: { cpu: 100m,  memory: 512Mi }
+
 # The bundled collector picks up EKS cluster + EC2 cloud attributes automatically
 # (eks/ec2 resourcedetection). No IRSA needed for the basic setup — it only reads
 # the kubelet and the K8s API via its ServiceAccount (RBAC is in the chart).
