@@ -22,7 +22,12 @@ data:
       filelog:
         include: [ /var/log/pods/*/*/*.log ]
         # Never ingest the collector's own logs (feedback loop and unparseable stack traces).
-        exclude: [ /var/log/pods/*/otelcol/*.log ]
+        exclude:
+          - /var/log/pods/*/otelcol/*.log
+          {{- range .Values.collector.excludeLogNamespaces | default list }}
+          # already-instrumented namespaces ship clean OTLP logs; don't double-collect their stdout
+          - /var/log/pods/{{ . }}_*/*/*.log
+          {{- end }}
         start_at: end
         include_file_path: true
         operators:
@@ -86,6 +91,22 @@ data:
           log_record:
             - 'IsMatch(body, "(?i)(health|readiness|liveness) ?check")'
             - 'resource.attributes["k8s.namespace.name"] == "kube-system" and severity_number < 9'
+      # Clean up scraped container-stdout logs so they are never "UNSET / <container>":
+      #   - give them a real service.name from the k8s deployment (not the container name)
+      #   - infer severity from JSON {"level":..} bodies and common text keywords
+      transform/logs:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - set(resource.attributes["service.name"], resource.attributes["k8s.deployment.name"]) where (resource.attributes["service.name"] == nil or resource.attributes["service.name"] == "") and resource.attributes["k8s.deployment.name"] != nil
+              - merge_maps(cache, ParseJSON(body), "upsert") where IsMatch(body, "^\\s*\\{")
+              - set(severity_number, SEVERITY_NUMBER_ERROR) where severity_number == 0 and (cache["level"] == 50 or IsMatch(body, "(?i)\\b(error|exception|fatal|panic)\\b"))
+              - set(severity_number, SEVERITY_NUMBER_WARN)  where severity_number == 0 and (cache["level"] == 40 or IsMatch(body, "(?i)\\bwarn"))
+              - set(severity_number, SEVERITY_NUMBER_INFO)  where severity_number == 0 and (cache["level"] == 30 or IsMatch(body, "(?i)\\binfo\\b"))
+              - set(severity_text, "ERROR") where severity_number == 17 and (severity_text == nil or severity_text == "")
+              - set(severity_text, "WARN")  where severity_number == 13 and (severity_text == nil or severity_text == "")
+              - set(severity_text, "INFO")  where severity_number == 9  and (severity_text == nil or severity_text == "")
       # Keep every errored trace and 20% of successful ones. Dash0's SignalControl
       # does the same thing with its tail-sampler. Tune in values.yaml.
       tail_sampling:
@@ -115,7 +136,7 @@ data:
                    processors: [memory_limiter, k8sattributes, resourcedetection, batch],
                    exporters: [otlphttp/pulse0] }
         logs:    { receivers: [otlp, filelog],
-                   processors: [memory_limiter, filter/noise, k8sattributes, resourcedetection, batch],
+                   processors: [memory_limiter, filter/noise, k8sattributes, resourcedetection, transform/logs, batch],
                    exporters: [otlphttp/pulse0] }
 ---
 apiVersion: v1

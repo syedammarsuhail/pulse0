@@ -134,6 +134,10 @@ securityContext:
 collector:
   enabled: true
   image: otel/opentelemetry-collector-contrib:0.111.0
+  # Namespaces whose pod stdout should NOT be scraped by the filelog receiver.
+  # Use for namespaces whose apps already export clean OTLP logs, so you don't
+  # get a duplicate, severity-less ("UNSET") copy of every log line.
+  excludeLogNamespaces: []
   # Cluster-wide Kubernetes metrics, collected by ONE pod (not once per node).
   clusterMetrics:
     enabled: true
