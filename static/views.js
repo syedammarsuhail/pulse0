@@ -225,7 +225,7 @@
     const sevOpts = [[0, "All levels"], [9, "INFO and above"], [13, "WARN and above"], [17, "ERROR and above"]];
     function logRow(r, fresh) {
       const sn = r.sev_text || sevName(r.severity);
-      const row = el("div", { class: "log" + (fresh ? " new" : ""), on: { click: () => toggle(row, r) } }, el("span", { class: "t" }, clock(r.ts_ns / 1e6)), el("span", { class: "sevt " + sn }, sn), el("span", { class: "sv", title: r.service }, r.service), el("span", { class: "b" }, r.body));
+      const row = el("div", { class: "log " + sn + (fresh ? " new" : ""), on: { click: () => toggle(row, r) } }, el("span", { class: "t" }, clock(r.ts_ns / 1e6)), el("span", { class: "sevt " + sn }, sn), el("span", { class: "sv", title: r.service }, r.service), el("span", { class: "b" }, r.body));
       return row;
     }
     function toggle(row, r) {
@@ -256,9 +256,21 @@
     const liveBtn = el("button", { class: "btn", on: { click: () => { st.live = !st.live; liveBtn.classList.toggle("primary", st.live); liveBtn.replaceChildren(icon(st.live ? "pause" : "play", 14), st.live ? "Live tail on" : "Live tail"); clearInterval(timer); if (st.live) timer = setInterval(() => loadRows(true), 2000); } } }, icon("play", 14), "Live tail");
     P.cleanupLogs = () => clearInterval(timer);
     const selSvc = fixed ? null : el("select", { on: { change: e => { st.service = e.target.value; update(); } } }, el("option", { value: "" }, "All services"), ...svcs.map(s => el("option", { value: s.service, selected: s.service === st.service }, s.service)));
+    const histH0 = Math.max(60, Math.min(360, +(localStorage.getItem("p0_logHistH") || 120)));
+    let histHidden = false;
+    const hideBtn = el("button", { class: "btn sm ghost", on: { click: () => { histHidden = !histHidden; histPanel.style.height = histHidden ? "0px" : (Math.max(60, Math.min(360, +(localStorage.getItem("p0_logHistH") || 120))) + "px"); histPanel.style.borderWidth = histHidden ? "0" : ""; hideBtn.textContent = histHidden ? "Show chart" : "Hide chart"; } } }, "Hide chart");
+    const histPanel = el("section", { class: "panel", style: `flex:none;height:${histH0}px` }, el("div", { class: "ph" }, "Volume over time", el("span", { class: "r" }, hideBtn)), el("div", { class: "pb", style: "padding:8px 12px;overflow:hidden" }, histHost));
+    const handle = el("div", { class: "vsplit", title: "Drag to resize the log panel" });
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const y0 = e.clientY, h0 = histPanel.getBoundingClientRect().height;
+      const mv = (ev) => { const h = Math.max(0, Math.min(400, h0 + (ev.clientY - y0))); histPanel.style.height = h + "px"; histPanel.style.borderWidth = h < 8 ? "0" : ""; };
+      const up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); const hh = parseInt(histPanel.style.height) || 0; histHidden = hh < 8; if (!histHidden) localStorage.setItem("p0_logHistH", String(hh)); hideBtn.textContent = histHidden ? "Show chart" : "Hide chart"; };
+      document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
+    });
     host.append(el("div", { class: "toolbar" }, selSvc, sevSel, qin, el("span", { class: "sp" }), liveBtn), chips,
       el("div", { class: "logs-layout fill" }, el("section", { class: "panel facetp" }, el("div", { class: "pb", style: "padding:4px 4px 8px" }, facets)),
-        el("div", { class: "col" }, el("section", { class: "panel", style: "flex:none" }, el("div", { class: "pb", style: "padding:8px 12px" }, histHost)), el("section", { class: "panel fill" }, el("div", { class: "ph" }, "Log entries", count), rowsBox))));
+        el("div", { class: "col" }, histPanel, handle, el("section", { class: "panel fill" }, el("div", { class: "ph" }, "Log entries", count), rowsBox))));
     renderChips(); await Promise.all([loadRows(), loadAside()]);
   }
   P.route("/logs", {
