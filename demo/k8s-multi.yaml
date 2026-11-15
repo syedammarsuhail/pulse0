@@ -1,0 +1,26 @@
+# 22-service simulated platform. Apply with:
+#   kubectl create ns sim; kubectl -n sim create secret generic pulse0-token --from-literal=token=<TOKEN>
+#   kubectl -n sim create configmap multi-load --from-file=multi_service_load.py=demo/multi_service_load.py
+#   kubectl apply -f demo/k8s-multi.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: multi-load, namespace: sim}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: multi-load}}
+  template:
+    metadata: {labels: {app: multi-load}}
+    spec:
+      containers:
+        - name: sim
+          image: public.ecr.aws/docker/library/python:3.12-slim
+          command: ["python", "-u", "/app/multi_service_load.py"]
+          env:
+            - {name: PULSE0_URL, value: "http://pulse0.observability:4318"}
+            - {name: BATCH, value: "30"}
+            - {name: PERIOD, value: "5"}
+            - name: PULSE0_TOKEN
+              valueFrom: {secretKeyRef: {name: pulse0-token, key: token}}
+          resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 250m, memory: 128Mi}}
+          volumeMounts: [{name: code, mountPath: /app}]
+      volumes: [{name: code, configMap: {name: multi-load}}]
