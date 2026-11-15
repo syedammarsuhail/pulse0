@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A self-hosted, OpenTelemetry-native observability platform (Dash0 alternative): one OTLP HTTP endpoint (`:4318`) ingests traces/logs/metrics into SQLite **or Postgres** and serves a vanilla-JS web UI plus a JSON API. Features: services/RED + health score, service map, traces, logs, metrics explorer, dashboards builder, alerts (with template library), SLOs, synthetics, rule-based Live Insights, an "Ask Pulse0" assistant (Claude-backed when a key is configured, rule-based fallback), and an optional multi-tenant hosted mode.
 
-The repo root also holds `pulse0.tar.gz` (the original archive, already extracted here). It is not a git repo.
+The repo root may also hold untracked `pulse-main*` archives from the original hand-off; ignore them.
 
 ## Commands
 
@@ -29,10 +29,14 @@ Env: `PULSE0_PORT`, `PULSE0_DB`, `PULSE0_RETENTION_HOURS`, `PULSE0_TOKEN` (beare
 - **Assistant:** `POST /api/assistant` uses the `anthropic` SDK with 10 read-only tools over the same query code; no key means a 503 with `fallback:/api/investigate`. `anthropic` is listed in both `requirements.txt` and the Dockerfile's inline `pip install`; keep them in sync.
 - **`static/`**: no build step. `index.html` loads `core.js` (router, helpers, charts), `views.js`/`views2.js` (pages), `map.js` + `mapkit.js` (service map; mapkit is the pure layout engine, tested by Node), `assistant.js`, `tenancy.js`. The server sends `Cache-Control: no-cache` on `/` and `/static/*`.
 - **`helm/pulse0/`**: StatefulSet (persistence comes from `volumeClaimTemplates`; there is no standalone PVC), service, optional ingress, an OTel collector DaemonSet (hostmetrics, kubeletstats, prometheus, filelog; the collector's own logs are excluded) plus a single-replica cluster-collector Deployment for the `k8s_cluster` receiver (needs the `autoscaling/horizontalpodautoscalers` RBAC rule or it terminates after its 10-minute sync timeout). `instrumentation.yaml` renders only when the OTel Operator CRD exists. Overlays: `values-eks|aks|baremetal.yaml`. `collector.traceSamplingPercent` defaults to 100; below 100 skews stored error rates.
+- **`deploy/vm/`**: non-Kubernetes install (docker-compose + systemd unit + collector config + env examples); see `ON-PREM.md`.
+- **`scripts/eks.sh {deploy|test|all|dns|rds|teardown}`** (also `/eks` in `.claude/commands/eks.md`): CodeBuild image build, eksctl cluster, Helm deploy, smoke test. Backend is chosen by env: `RDS_IN_VPC=1` (+`RDS_CLASS`, default `db.t4g.small`) creates a private RDS in the cluster VPC; `SUPABASE_DB_URL` uses an external Postgres; neither means SQLite on an EBS PVC. `PULSE0_DNS_NAME` + `PULSE0_HOSTED_ZONE_ID` add a Route53 CNAME to the ELB. `SKIP_BUILD=1` reuses the ECR image. The RDS password lives in `.eks-rds-state` (gitignored) which `teardown` needs, so don't delete it while the cluster is up. Verified 2026-11-15: 35/35 smoke checks on EKS + in-VPC RDS, pages ~0.05s.
 - **`test-apps/`**: per-language apps (`k8s/` for Python/Node/Java/.NET/Go/Angular) and `shop/` (polyglot connected shop + configurable load generator with `build.sh`/`deploy.sh`). `demo/` is the original two-service demo.
 - `tests/MAP_FREEZE.md` documents an unreproduced browser-tab freeze (likely dev-PC memory pressure, not an app loop).
 
 ## Gotchas learned the hard way
+
+- A brand-new EKS API hostname can fail to resolve for a few minutes after `eksctl create cluster`; `eks.sh` retries `kubectl get nodes` for that reason. Free-tier Supabase cannot run Pulse0 (it collapsed at ~176k spans and auto-pauses when idle); a sized Postgres (RDS `db.t4g.small`+) works fine.
 
 - `helm upgrade --reuse-values` ignores new chart defaults and can render empty required values; pass the full value set explicitly when upgrading across chart changes.
 - Pin `--kube-context` on every kubectl/helm call when other clusters exist in kubeconfig; never run in-cluster cleanup against the current context.

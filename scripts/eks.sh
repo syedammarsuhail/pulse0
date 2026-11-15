@@ -153,23 +153,88 @@ EOF
   fi
   # never operate on any cluster other than the one this pipeline owns
   kubectl config use-context "$(kubectl config get-contexts -o name | grep "@$NAME\.$REGION\.eksctl.io\|/$NAME\$" | head -1)" >/dev/null
+  # a brand-new EKS endpoint can take a few minutes to resolve; retry instead of aborting
+  local i
+  for i in $(seq 1 30); do kubectl get nodes >/dev/null 2>&1 && break; echo "  waiting for the EKS API endpoint to resolve ($i/30)"; sleep 10; done
   kubectl get nodes
 }
 
+# Create an RDS Postgres instance INSIDE the cluster's own VPC (private, reachable
+# only from the cluster) and export SUPABASE_DB_URL so deploy_app wires Pulse0 to it.
+RDS_STATE="$ROOT/.eks-rds-state"
+ensure_rds() {
+  need aws; need python
+  say "In-VPC RDS Postgres (${RDS_CLASS:-db.t4g.small})"
+  aws eks update-kubeconfig --name "$NAME" --region "$REGION" >/dev/null 2>&1 || true
+  local vpc csg cidr subs rsg rid ep pw
+  vpc="$(aws eks describe-cluster --name "$NAME" --region "$REGION" --query cluster.resourcesVpcConfig.vpcId --output text)"
+  csg="$(aws eks describe-cluster --name "$NAME" --region "$REGION" --query cluster.resourcesVpcConfig.clusterSecurityGroupId --output text)"
+  cidr="$(aws ec2 describe-vpcs --vpc-ids "$vpc" --region "$REGION" --query 'Vpcs[0].CidrBlock' --output text)"
+  subs="$(aws ec2 describe-subnets --filters Name=vpc-id,Values=$vpc --region "$REGION" --query 'Subnets[].SubnetId' --output text)"
+  rid="$NAME-db"
+
+  rsg="$(aws ec2 create-security-group --group-name "$NAME-rds-sg" --description "pulse0 in-vpc rds" \
+        --vpc-id "$vpc" --region "$REGION" --query GroupId --output text 2>/dev/null \
+        || aws ec2 describe-security-groups --filters Name=group-name,Values=$NAME-rds-sg Name=vpc-id,Values=$vpc \
+             --region "$REGION" --query 'SecurityGroups[0].GroupId' --output text)"
+  aws ec2 authorize-security-group-ingress --group-id "$rsg" --protocol tcp --port 5432 --source-group "$csg" --region "$REGION" >/dev/null 2>&1 || true
+  aws ec2 authorize-security-group-ingress --group-id "$rsg" --protocol tcp --port 5432 --cidr "$cidr" --region "$REGION" >/dev/null 2>&1 || true
+  aws rds create-db-subnet-group --db-subnet-group-name "$NAME-sng" --db-subnet-group-description "pulse0" \
+    --subnet-ids $subs --region "$REGION" >/dev/null 2>&1 || true
+
+  if aws rds describe-db-instances --db-instance-identifier "$rid" --region "$REGION" >/dev/null 2>&1; then
+    echo "  reusing existing $rid — need its password"
+    : "${RDS_PASSWORD:?existing RDS found; set RDS_PASSWORD to reuse it, or teardown first}"
+    pw="$RDS_PASSWORD"
+  else
+    pw="$(python -c 'import secrets,string;print("".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))')"
+    aws rds create-db-instance --db-instance-identifier "$rid" \
+      --db-instance-class "${RDS_CLASS:-db.t4g.small}" --engine postgres \
+      --master-username pulse0admin --master-user-password "$pw" \
+      --allocated-storage 20 --storage-type gp3 \
+      --db-subnet-group-name "$NAME-sng" --vpc-security-group-ids "$rsg" \
+      --no-publicly-accessible --backup-retention-period 0 --no-multi-az \
+      --no-deletion-protection --region "$REGION" >/dev/null
+  fi
+  { echo "RDS_ID=$rid"; echo "RDS_SG=$rsg"; echo "RDS_SNG=$NAME-sng"; echo "RDS_PASSWORD=$pw"; } > "$RDS_STATE"
+  say "Waiting for RDS to become available (8-12 min)"
+  aws rds wait db-instance-available --db-instance-identifier "$rid" --region "$REGION"
+  ep="$(aws rds describe-db-instances --db-instance-identifier "$rid" --region "$REGION" --query 'DBInstances[0].Endpoint.Address' --output text)"
+  export SUPABASE_DB_URL="postgresql://pulse0admin:${pw}@${ep}:5432/postgres"
+  echo "  RDS ready (private) at $ep in VPC $vpc"
+}
+
+teardown_rds() {
+  [ -f "$RDS_STATE" ] || return 0
+  # shellcheck disable=SC1090
+  source "$RDS_STATE"
+  say "Deleting in-VPC RDS ${RDS_ID:-}"
+  aws rds delete-db-instance --db-instance-identifier "$RDS_ID" --skip-final-snapshot --delete-automated-backups --region "$REGION" >/dev/null 2>&1 || true
+  aws rds wait db-instance-deleted --db-instance-identifier "$RDS_ID" --region "$REGION" 2>/dev/null || true
+  aws rds delete-db-subnet-group --db-subnet-group-name "$RDS_SNG" --region "$REGION" >/dev/null 2>&1 || true
+  aws ec2 delete-security-group --group-id "$RDS_SG" --region "$REGION" >/dev/null 2>&1 || true
+  rm -f "$RDS_STATE"
+}
+
 deploy_app() {
-  : "${SUPABASE_DB_URL:?set SUPABASE_DB_URL to the postgres connection string}"
-  say "Database secret"
-  kubectl create namespace "$NS" >/dev/null 2>&1 || true
-  kubectl -n "$NS" delete secret pulse0-db >/dev/null 2>&1 || true
-  kubectl -n "$NS" create secret generic pulse0-db --from-literal=database-url="$SUPABASE_DB_URL" >/dev/null
+  local dbargs
+  if [ -n "${SUPABASE_DB_URL:-}" ]; then
+    say "Database secret (Postgres backend)"
+    kubectl create namespace "$NS" >/dev/null 2>&1 || true
+    kubectl -n "$NS" delete secret pulse0-db >/dev/null 2>&1 || true
+    kubectl -n "$NS" create secret generic pulse0-db --from-literal=database-url="$SUPABASE_DB_URL" >/dev/null
+    dbargs="--set postgres.enabled=true --set postgres.existingSecret=pulse0-db --set persistence.enabled=false"
+  else
+    say "SQLite-on-EBS backend (no Postgres URL given)"
+    dbargs="--set postgres.enabled=false --set persistence.enabled=true"
+  fi
 
   say "Helm deploy"
   helm lint ./helm/pulse0
   helm upgrade --install pulse0 ./helm/pulse0 -n "$NS" --create-namespace \
     -f ./helm/pulse0/values-eks.yaml \
     --set image.repository="$REPO" --set-string image.tag="$TAG" --set image.pullPolicy=Always \
-    --set postgres.enabled=true --set postgres.existingSecret=pulse0-db \
-    --set persistence.enabled=false \
+    $dbargs \
     --set service.type=LoadBalancer \
     --set auth.token="$TOKEN" \
     --set-string env.PULSE0_CACHE_TTL=45 \
@@ -186,8 +251,42 @@ deploy_app() {
   local lb=""
   for _ in $(seq 1 60); do lb="$(lb_host)"; [ -n "$lb" ] && break; sleep 10; done
   [ -n "$lb" ] || { echo "load balancer never appeared" >&2; exit 1; }
-  echo "UI: http://$lb:4318"
+  echo "UI (ELB DNS): http://$lb:4318"
   echo "ui_url=http://$lb:4318" >>"${GITHUB_OUTPUT:-/dev/null}"
+  maybe_dns "$lb"
+}
+
+# Point a friendly Route53 hostname at the load balancer (CNAME).
+#   PULSE0_DNS_NAME        desired hostname, e.g. pulse0.example.com
+#   PULSE0_HOSTED_ZONE_ID  the Route53 hosted zone that owns that domain
+dns() {
+  need aws
+  : "${PULSE0_DNS_NAME:?set PULSE0_DNS_NAME to the desired hostname, e.g. pulse0.example.com}"
+  : "${PULSE0_HOSTED_ZONE_ID:?set PULSE0_HOSTED_ZONE_ID to your Route53 hosted zone id}"
+  local lb="${1:-}"
+  if [ -z "$lb" ]; then
+    aws eks update-kubeconfig --name "$NAME" --region "$REGION" >/dev/null 2>&1 || true
+    lb="$(lb_host)"
+  fi
+  [ -n "$lb" ] || { echo "no load balancer found for $NAME; run deploy first" >&2; exit 1; }
+  say "Route53 CNAME $PULSE0_DNS_NAME -> $lb"
+  local batch; batch=".eks-dns.json"
+  cat >"$batch" <<EOF
+{"Comment":"pulse0 endpoint","Changes":[{"Action":"UPSERT","ResourceRecordSet":{"Name":"$PULSE0_DNS_NAME","Type":"CNAME","TTL":60,"ResourceRecords":[{"Value":"$lb"}]}}]}
+EOF
+  aws route53 change-resource-record-sets --hosted-zone-id "$PULSE0_HOSTED_ZONE_ID" --change-batch "file://$batch" >/dev/null
+  rm -f "$batch"
+  echo "UI (DNS): http://$PULSE0_DNS_NAME:4318   (propagates in ~1-2 min)"
+  echo "dns_url=http://$PULSE0_DNS_NAME:4318" >>"${GITHUB_OUTPUT:-/dev/null}"
+}
+
+# Run dns() only when both env vars are set; never fail the deploy if they are not.
+maybe_dns() {
+  [ -n "${PULSE0_DNS_NAME:-}" ] && [ -n "${PULSE0_HOSTED_ZONE_ID:-}" ] || {
+    echo "(no custom DNS: set PULSE0_DNS_NAME + PULSE0_HOSTED_ZONE_ID to get a friendly hostname)"
+    return 0
+  }
+  dns "${1:-}"
 }
 
 run_tests() {
@@ -206,6 +305,20 @@ run_tests() {
 }
 
 teardown() {
+  if [ -n "${PULSE0_DNS_NAME:-}" ] && [ -n "${PULSE0_HOSTED_ZONE_ID:-}" ]; then
+    say "Removing Route53 record $PULSE0_DNS_NAME"
+    local cur
+    cur="$(aws route53 list-resource-record-sets --hosted-zone-id "$PULSE0_HOSTED_ZONE_ID" \
+      --query "ResourceRecordSets[?Name=='${PULSE0_DNS_NAME}.'].ResourceRecords[0].Value | [0]" --output text 2>/dev/null || true)"
+    if [ -n "$cur" ] && [ "$cur" != "None" ]; then
+      cat >.eks-dns.json <<EOF
+{"Changes":[{"Action":"DELETE","ResourceRecordSet":{"Name":"$PULSE0_DNS_NAME","Type":"CNAME","TTL":60,"ResourceRecords":[{"Value":"$cur"}]}}]}
+EOF
+      aws route53 change-resource-record-sets --hosted-zone-id "$PULSE0_HOSTED_ZONE_ID" --change-batch file://.eks-dns.json >/dev/null 2>&1 || true
+      rm -f .eks-dns.json
+    fi
+  fi
+  teardown_rds
   say "Removing load balancer service"
   if aws eks update-kubeconfig --name "$NAME" --region "$REGION" >/dev/null 2>&1; then
     kubectl -n "$NS" delete svc pulse0 --ignore-not-found --timeout=180s || true
@@ -222,9 +335,11 @@ teardown() {
 
 for t in aws "$PY"; do need "$t"; done
 case "${1:-}" in
-  deploy)   for t in eksctl kubectl helm; do need "$t"; done; build_image; ensure_cluster; deploy_app ;;
+  deploy)   for t in eksctl kubectl helm; do need "$t"; done; [ "${SKIP_BUILD:-0}" = 1 ] || build_image; ensure_cluster; [ "${RDS_IN_VPC:-0}" = 1 ] && ensure_rds; deploy_app ;;
   test)     run_tests ;;
-  all)      for t in eksctl kubectl helm; do need "$t"; done; build_image; ensure_cluster; deploy_app; run_tests ;;
+  all)      for t in eksctl kubectl helm; do need "$t"; done; [ "${SKIP_BUILD:-0}" = 1 ] || build_image; ensure_cluster; [ "${RDS_IN_VPC:-0}" = 1 ] && ensure_rds; deploy_app; run_tests ;;
+  dns)      need kubectl; dns ;;
+  rds)      need kubectl; ensure_rds; echo "SUPABASE_DB_URL set for this shell only"; ;;
   teardown) need eksctl; teardown ;;
-  *) echo "usage: $0 {deploy|test|all|teardown}" >&2; exit 2 ;;
+  *) echo "usage: $0 {deploy|test|all|dns|rds|teardown}  (set RDS_IN_VPC=1 for an in-VPC RDS backend)" >&2; exit 2 ;;
 esac
