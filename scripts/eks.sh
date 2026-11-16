@@ -61,7 +61,9 @@ PYEOF
   aws s3 cp "$zip" "s3://$BUCKET/src.zip" --region "$REGION" --only-show-errors
 
   say "CodeBuild project"
+  local fresh_role=0
   if ! aws iam get-role --role-name "$ROLE" >/dev/null 2>&1; then
+    fresh_role=1
     aws iam create-role --role-name "$ROLE" --assume-role-policy-document \
       '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"codebuild.amazonaws.com"},"Action":"sts:AssumeRole"}]}' >/dev/null
     sleep 10
@@ -71,6 +73,8 @@ PYEOF
    {\"Effect\":\"Allow\",\"Action\":[\"ecr:BatchCheckLayerAvailability\",\"ecr:InitiateLayerUpload\",\"ecr:UploadLayerPart\",\"ecr:CompleteLayerUpload\",\"ecr:PutImage\",\"ecr:BatchGetImage\",\"ecr:GetDownloadUrlForLayer\"],\"Resource\":\"arn:aws:ecr:$REGION:$ACCOUNT:repository/$REPO_NAME\"},
    {\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:GetObjectVersion\"],\"Resource\":\"arn:aws:s3:::$BUCKET/*\"},
    {\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Resource\":\"*\"}]}"
+  # a brand-new role's inline policy takes a while to propagate; building too early fails with a CloudWatch Logs CLIENT_ERROR
+  [ "$fresh_role" = 1 ] && { echo "  waiting for the new IAM role to propagate"; sleep 40; }
   local spec="version: 0.2
 phases:
   pre_build:
@@ -152,7 +156,9 @@ EOF
     rm -f "$cfg"
   fi
   # never operate on any cluster other than the one this pipeline owns
-  kubectl config use-context "$(kubectl config get-contexts -o name | grep "@$NAME\.$REGION\.eksctl.io\|/$NAME\$" | head -1)" >/dev/null
+  # always rewrite the kubeconfig entry: an old cluster with the same name leaves a stale endpoint behind
+  aws eks update-kubeconfig --name "$NAME" --region "$REGION" >/dev/null
+  kubectl config use-context "arn:aws:eks:$REGION:$ACCOUNT:cluster/$NAME" >/dev/null
   # a brand-new EKS endpoint can take a few minutes to resolve; retry instead of aborting
   local i
   for i in $(seq 1 30); do kubectl get nodes >/dev/null 2>&1 && break; echo "  waiting for the EKS API endpoint to resolve ($i/30)"; sleep 10; done
