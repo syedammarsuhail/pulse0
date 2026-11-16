@@ -17,7 +17,7 @@ jobs:
   published-image:
     runs-on: ubuntu-latest
     steps:
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ghcr.io/${{ github.repository_owner }}/pulse0:latest
           severity: CRITICAL,HIGH
@@ -30,7 +30,7 @@ jobs:
   collector-image:
     runs-on: ubuntu-latest
     steps:
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: otel/opentelemetry-collector-contrib:0.111.0
           severity: CRITICAL
@@ -42,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Scan Dockerfile and Helm chart for misconfigurations
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: .
