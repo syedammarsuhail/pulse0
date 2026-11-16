@@ -1,0 +1,50 @@
+name: Security scan
+
+# Weekly re-scan of what is actually published (new CVEs appear after release), plus the
+# collector image and the Helm chart/Dockerfile config. Run it any time from the Actions tab.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+  security-events: write
+
+jobs:
+  published-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/pulse0:latest
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+  collector-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: otel/opentelemetry-collector-contrib:0.111.0
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+  config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan Dockerfile and Helm chart for misconfigurations
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: "0"

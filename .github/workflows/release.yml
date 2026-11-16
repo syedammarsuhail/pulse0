@@ -71,7 +71,26 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Scan image (Trivy)
+      # Report CRITICAL+HIGH (visible in the run summary and the Security tab), never blocks.
+      - name: Scan image, full report (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: pulse0:scan
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: sarif
+          output: trivy.sarif
+          exit-code: "0"
+
+      - name: Upload scan results to the Security tab
+        if: always() && github.event_name != 'pull_request'
+        continue-on-error: true   # needs code scanning (free on public repos, GHAS on private)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+
+      # Gate: fixable CRITICAL vulnerabilities stop the release before anything is pushed.
+      - name: Scan image, gate on CRITICAL (Trivy)
         uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: pulse0:scan
