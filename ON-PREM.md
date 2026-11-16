@@ -82,6 +82,46 @@ helm uninstall pulse0 -n observability      # the data volume is kept until you 
 
 Pass the full set of values on upgrade rather than `--reuse-values`, which keeps stale defaults across chart versions.
 
+## Install from the published packages (GHCR)
+
+The `Release` GitHub Action publishes everything to GitHub Container Registry, so you do not have to build anything by hand. Replace `syedammarsuhail` if the repo is under another owner. If the packages are private, log in first: `echo $GITHUB_PAT | helm registry login ghcr.io -u <user> --password-stdin` and `docker login ghcr.io`.
+
+| Package | Where | When it is published |
+|---|---|---|
+| Image | `ghcr.io/syedammarsuhail/pulse0:<tag>` (amd64 + arm64, signed) | `edge` and `sha-<short>` on each push to master; `X.Y.Z` and `X.Y` on a `vX.Y.Z` tag |
+| Helm chart | `oci://ghcr.io/syedammarsuhail/charts/pulse0` | `0.0.0-edge.<sha>` on master; `X.Y.Z` on a tag |
+
+```bash
+# Install straight from the OCI chart
+helm install pulse0 oci://ghcr.io/syedammarsuhail/charts/pulse0 --version 0.1.0   -n observability --create-namespace   -f values-onprem.yaml   --set image.repository=ghcr.io/syedammarsuhail/pulse0 --set-string image.tag=0.1.0   --set auth.token=$(openssl rand -hex 24)
+
+# Upgrade (pass the full values again, not --reuse-values)
+helm upgrade pulse0 oci://ghcr.io/syedammarsuhail/charts/pulse0 --version 0.1.1   -n observability -f values-onprem.yaml --set-string image.tag=0.1.1 --set auth.token=<same token>
+
+# Look at the chart and its defaults, or fetch it
+helm show values oci://ghcr.io/syedammarsuhail/charts/pulse0 --version 0.1.0 > values-default.yaml
+helm pull oci://ghcr.io/syedammarsuhail/charts/pulse0 --version 0.1.0
+
+# Verify the image signature (keyless, signed by this repo's release workflow)
+cosign verify ghcr.io/syedammarsuhail/pulse0:0.1.0   --certificate-identity-regexp 'https://github.com/syedammarsuhail/pulse0/.*'   --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+`values-onprem.yaml` is your own file: start from `helm/pulse0/values-baremetal.yaml` and set `persistence.storageClass`, `service`/`ingress`, and `collector.traceSamplingPercent`.
+
+**Mirror into an internal registry (Harbor, Artifactory, ...)**
+
+```bash
+skopeo copy --all docker://ghcr.io/syedammarsuhail/pulse0:0.1.0 docker://registry.example.com/pulse0:0.1.0
+skopeo copy docker://otel/opentelemetry-collector-contrib:0.111.0 docker://registry.example.com/otel/opentelemetry-collector-contrib:0.111.0
+helm pull oci://ghcr.io/syedammarsuhail/charts/pulse0 --version 0.1.0
+helm push pulse0-0.1.0.tgz oci://registry.example.com/charts
+# then install with --set image.repository=registry.example.com/pulse0 and --set collector.image=registry.example.com/otel/opentelemetry-collector-contrib:0.111.0
+```
+
+**Fully air-gapped.** On a machine with internet run `OWNER=syedammarsuhail VERSION=0.1.0 bash scripts/bundle.sh`. It writes `pulse0-bundle/` (both images, the chart and an `INSTALL.txt`). Copy that folder across, import the images on every node, and `helm install ./pulse0-*.tgz` with `image.pullPolicy=Never`.
+
+**Cutting a release:** `git tag v0.1.0 && git push origin v0.1.0`. That publishes the image and chart and creates the GitHub release. The first time, open the package in GitHub (Packages, pulse0, Package settings) and set it public if you want to pull without logging in.
+
 ## VM with Docker
 
 Needs Docker with the Compose plugin. Files are in `deploy/vm/`.
