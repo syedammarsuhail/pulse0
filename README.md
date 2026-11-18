@@ -1,4 +1,4 @@
-> **Install or demo Pulse0:** see [DEMO-GUIDE.md](DEMO-GUIDE.md) and the latest package `pulse0-onprem-v10_17.tar.gz`.
+> **Install or demo Pulse0:** see [DEMO-GUIDE.md](DEMO-GUIDE.md) and the latest package `pulse0-onprem-v10_18.tar.gz`.
 
 # Pulse0 — OpenTelemetry-Native Observability Platform
 

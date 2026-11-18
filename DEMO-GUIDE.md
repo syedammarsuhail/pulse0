@@ -1,11 +1,11 @@
-> **Start here.** Download the latest package from this repository, **`pulse0-onprem-v10_17.tar.gz`**, and unpack it:
+> **Start here.** Download the latest package from this repository, **`pulse0-onprem-v10_18.tar.gz`**, and unpack it:
 >
 > ```bash
-> tar -xzf pulse0-onprem-v10_17.tar.gz && cd pulse0-v10_17
+> tar -xzf pulse0-onprem-v10_18.tar.gz && cd pulse0-v10_18
 > ```
 >
 > Run every command in this guide from that folder. The files it mentions (`ON-PREM.md`, `demo/`, `scripts/eks.sh`, `helm/pulse0/`) are inside the package.
-> Older `pulse0-onprem-v10_*.tar.gz` files in this repository are superseded; use v10.17 or newer.
+> Older `pulse0-onprem-v10_*.tar.gz` files in this repository are superseded; use v10.18 or newer.
 
 # Pulse0: running a demo for a client
 
@@ -108,7 +108,7 @@ RDS_IN_VPC=1 SKIP_SHOP=1 bash scripts/eks.sh all    # ~30 minutes; prints the UI
 5. **Logs**: switch to *Errors only*, expand a row to show the stack trace, the pod, namespace and node, and the linked trace. Drag across the volume bar at the bottom to zoom in time.
 6. **Insights, Alerts, SLOs**: rule-based findings ("error rate spike on search-service"), alert templates, error budget.
 7. **Kubernetes**: nodes, pods and workloads with their logs.
-8. **Ask Pulse0** (Pro trial, needs your own Anthropic API key): "why is checkout slow?"
+8. **Ask Pulse0** (Pro trial; connect any AI model in Settings → AI assistant: Claude, OpenAI, or a local model such as Ollama): "why is checkout slow?"
 
 ## New demo for another client
 
