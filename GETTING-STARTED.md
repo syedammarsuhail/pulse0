@@ -1,5 +1,5 @@
 > This guide is also inside the package as `GETTING-STARTED.md`. Download the newest package from this repository:
-> **`pulse0-onprem-v10_20.tar.gz`**. Older `pulse0-onprem-v10_*.tar.gz` files are kept for reference only.
+> **`pulse0-onprem-v10_22.tar.gz`**. Older `pulse0-onprem-v10_*.tar.gz` files are kept for reference only.
 
 # Getting started with Pulse0
 
@@ -35,8 +35,8 @@ This guide takes you from nothing to a working install with data. It takes about
 Download the newest `pulse0-onprem-v10_*.tar.gz` from the repository, then:
 
 ```bash
-tar -xzf pulse0-onprem-v10_20.tar.gz
-cd pulse0-v10_20
+tar -xzf pulse0-onprem-v10_22.tar.gz
+cd pulse0-v10_22
 ```
 
 Run every command below from this folder.
@@ -44,8 +44,8 @@ Run every command below from this folder.
 ## 3. Build the image
 
 ```bash
-docker build -t registry.example.com/pulse0:10.20 .
-docker push registry.example.com/pulse0:10.20        # skip if you run on this same machine
+docker build -t registry.example.com/pulse0:10.22 .
+docker push registry.example.com/pulse0:10.22        # skip if you run on this same machine
 ```
 
 No registry (air-gapped)? Save the image to a file and import it on each node: see `ON-PREM.md` (inside the package) section 1.
@@ -71,7 +71,7 @@ TOKEN=<the token from step 4>
 helm install pulse0 ./helm/pulse0 -n observability --create-namespace \
   -f helm/pulse0/values-baremetal.yaml \
   --set image.repository=registry.example.com/pulse0 \
-  --set-string image.tag=10.20 \
+  --set-string image.tag=10.22 \
   --set auth.token=$TOKEN
 kubectl -n observability rollout status statefulset/pulse0
 ```
@@ -91,7 +91,7 @@ kubectl -n observability port-forward svc/pulse0 4318:4318      # then http://lo
 
 ```bash
 cd deploy/vm
-cp .env.example .env        # set PULSE0_TOKEN to your token, and PULSE0_IMAGE=registry.example.com/pulse0:10.20
+cp .env.example .env        # set PULSE0_TOKEN to your token, and PULSE0_IMAGE=registry.example.com/pulse0:10.22
 docker compose up -d
 docker compose ps           # both services should be running / healthy
 ```
@@ -135,6 +135,10 @@ and cluster metrics, and the **Kubernetes** page fills, without changing any app
 - **Docker VM:** apps send to `http://<vm-ip>:4319` (the host collector) or `http://<vm-ip>:4318`.
 
 **Your website (optional):** the **Website** page explains itself and shows the one line to add to your site, with copy buttons.
+
+**CPU and memory dashboard (optional):** the chart already collects host and pod CPU / memory. To get a ready-made
+*Cluster - CPU & Memory* dashboard, run `python3 scripts/create-dashboards.py --url http://<host>:4318 --token <token>`. It also
+tells you which panels have data yet (allow 2-3 minutes after install).
 
 **Demo traffic (optional):** see [DEMO-GUIDE.md](DEMO-GUIDE.md) for a simulated 22-service shop with realistic faults.
 

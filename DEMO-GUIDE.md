@@ -1,11 +1,11 @@
-> **Start here.** Download the latest package from this repository, **`pulse0-onprem-v10_20.tar.gz`**, and unpack it:
+> **Start here.** Download the latest package from this repository, **`pulse0-onprem-v10_22.tar.gz`**, and unpack it:
 >
 > ```bash
-> tar -xzf pulse0-onprem-v10_20.tar.gz && cd pulse0-v10_20
+> tar -xzf pulse0-onprem-v10_22.tar.gz && cd pulse0-v10_22
 > ```
 >
 > Run every command in this guide from that folder. The files it mentions (`ON-PREM.md`, `demo/`, `scripts/eks.sh`, `helm/pulse0/`) are inside the package.
-> Older `pulse0-onprem-v10_*.tar.gz` files in this repository are superseded; use v10.20 or newer.
+> Older `pulse0-onprem-v10_*.tar.gz` files in this repository are superseded; use v10.22 or newer.
 
 # Pulse0: running a demo for a client
 
