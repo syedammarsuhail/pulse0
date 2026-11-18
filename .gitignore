@@ -19,3 +19,6 @@ shop-build.log
 .eks-dns.json
 # local archives
 pulse-main/
+
+# Paid (Pro/Enterprise) module: proprietary, kept in a private repo and overlaid at build time. Never commit it here.
+enterprise/
