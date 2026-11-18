@@ -44,7 +44,7 @@ jobs:
           args: >
             -Dsonar.organization=syedammarsuhail-1
             -Dsonar.projectKey=syedammarsuhail_pulse0
-            -Dsonar.sources=server.py,static/,enterprise/
+            -Dsonar.sources=server.py,static/
             -Dsonar.tests=tests/
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.python.version=3.12

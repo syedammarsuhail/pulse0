@@ -6,16 +6,16 @@ Runs on your own Kubernetes cluster or a single VM; your data stays with you.
 
 ## Start here
 
-1. **Download** the latest package: **[`pulse0-onprem-v10_22.tar.gz`](pulse0-onprem-v10_22.tar.gz)**.
+1. **Download** the latest package: **[`pulse0-onprem-v10_23.tar.gz`](pulse0-onprem-v10_23.tar.gz)**.
 2. **Follow [GETTING-STARTED.md](GETTING-STARTED.md)**: build, install (Kubernetes, a Docker VM or a laptop), first login, getting data in,
    the AI assistant, Community vs Pro, upgrading and troubleshooting. About 20 minutes.
 3. **Giving a client demo?** See **[DEMO-GUIDE.md](DEMO-GUIDE.md)**.
 
 | Package | Use |
 |---|---|
-| `pulse0-onprem-v10_22.tar.gz` | **Latest: use this one** |
-| `pulse0-onprem-v10_6` ... `v10_20` | Earlier releases, kept for reference |
-| `files (2).zip` (contains a separate `v10_21`) | Superseded by v10_22, which includes its metrics and dashboard work; do not install that v10_21 |
+| `pulse0-onprem-v10_23.tar.gz` | **Latest: use this one** |
+| `pulse0-onprem-v10_6` ... `v10_22` | Earlier releases, kept for reference |
+| `files (2).zip` (contains a separate `v10_21`) | Superseded by v10_22 and later, which include its metrics and dashboard work; do not install that v10_21 |
 
 Every package contains the complete product: the server, web UI, Helm chart, VM install files, demo apps and docs
 (`GETTING-STARTED.md`, `ON-PREM.md`, `DEMO.md`, `UPGRADE.md`). The Pro license module is proprietary and is not in this repository.

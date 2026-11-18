@@ -1,5 +1,5 @@
 > This guide is also inside the package as `GETTING-STARTED.md`. Download the newest package from this repository:
-> **`pulse0-onprem-v10_22.tar.gz`**. Older `pulse0-onprem-v10_*.tar.gz` files are kept for reference only.
+> **`pulse0-onprem-v10_23.tar.gz`**. Older `pulse0-onprem-v10_*.tar.gz` files are kept for reference only.
 
 # Getting started with Pulse0
 
@@ -35,8 +35,8 @@ This guide takes you from nothing to a working install with data. It takes about
 Download the newest `pulse0-onprem-v10_*.tar.gz` from the repository, then:
 
 ```bash
-tar -xzf pulse0-onprem-v10_22.tar.gz
-cd pulse0-v10_22
+tar -xzf pulse0-onprem-v10_23.tar.gz
+cd pulse0-v10_23
 ```
 
 Run every command below from this folder.
@@ -44,8 +44,8 @@ Run every command below from this folder.
 ## 3. Build the image
 
 ```bash
-docker build -t registry.example.com/pulse0:10.22 .
-docker push registry.example.com/pulse0:10.22        # skip if you run on this same machine
+docker build -t registry.example.com/pulse0:10.23 .
+docker push registry.example.com/pulse0:10.23        # skip if you run on this same machine
 ```
 
 No registry (air-gapped)? Save the image to a file and import it on each node: see `ON-PREM.md` (inside the package) section 1.
@@ -71,7 +71,7 @@ TOKEN=<the token from step 4>
 helm install pulse0 ./helm/pulse0 -n observability --create-namespace \
   -f helm/pulse0/values-baremetal.yaml \
   --set image.repository=registry.example.com/pulse0 \
-  --set-string image.tag=10.22 \
+  --set-string image.tag=10.23 \
   --set auth.token=$TOKEN
 kubectl -n observability rollout status statefulset/pulse0
 ```
@@ -91,7 +91,7 @@ kubectl -n observability port-forward svc/pulse0 4318:4318      # then http://lo
 
 ```bash
 cd deploy/vm
-cp .env.example .env        # set PULSE0_TOKEN to your token, and PULSE0_IMAGE=registry.example.com/pulse0:10.22
+cp .env.example .env        # set PULSE0_TOKEN to your token, and PULSE0_IMAGE=registry.example.com/pulse0:10.23
 docker compose up -d
 docker compose ps           # both services should be running / healthy
 ```
@@ -246,7 +246,9 @@ Your data is kept. New tables are created automatically.
 
 ## Security checklist
 
-- A long random `PULSE0_TOKEN`, different for every install.
+- Scan every build before you deploy it: `bash scripts/release-check.sh` (tests, dependency CVEs, code scan, secrets, chart).
+  In a GitHub repository, `.github/workflows/security.yml` also runs Snyk and SonarCloud and publishes only when all pass.
+- A long random `PULSE0_TOKEN`, different for every install. The chart refuses the placeholder tokens in its values files.
 - HTTPS in front of port 4318 (any reverse proxy or ingress).
 - Open only the ports you use: 4318 (UI and API), and 4317 / 4319 for the collector if other machines send to it.
 - For a website, use an ingest-only token (`PULSE0_INGEST_TOKEN`), never the admin token: web pages are public.

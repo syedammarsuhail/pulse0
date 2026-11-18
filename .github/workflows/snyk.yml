@@ -26,7 +26,6 @@ jobs:
 
       - name: Run Snyk Open Source (Python dependencies)
         uses: snyk/actions/python-3.10@master
-        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
@@ -49,7 +48,6 @@ jobs:
 
       - name: Run Snyk Container (Docker image)
         uses: snyk/actions/docker@master
-        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
@@ -71,7 +69,6 @@ jobs:
 
       - name: Run Snyk Code (SAST)
         uses: snyk/actions/python-3.10@master
-        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:

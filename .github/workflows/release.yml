@@ -8,8 +8,8 @@ name: Release (image + chart)
 # No secrets to configure: it uses the built-in GITHUB_TOKEN.
 
 on:
+  # Publish only on a version tag or a manual run: publishing on every push to master released unscanned code.
   push:
-    branches: [master, main]
     tags: ["v*.*.*"]
   pull_request:
     branches: [master, main]
