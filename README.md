@@ -1,3 +1,5 @@
+> **Install or demo Pulse0:** see [DEMO-GUIDE.md](DEMO-GUIDE.md) and the latest package `pulse0-onprem-v10_12.tar.gz`.
+
 # Pulse0 — OpenTelemetry-Native Observability Platform
 
 Your own observability platform. Single OTLP endpoint for traces, logs, and metrics. Resource-centric UI. Zero code changes in your apps. Runs on any Kubernetes — **EKS, AKS, bare-metal, k3s, kind** — or just Docker. Covers every pillar of what Dash0 charges for, plus a **Service Health Score** feature they don't have.
