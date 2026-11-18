@@ -1,6 +1,32 @@
-> **Install or demo Pulse0:** see [DEMO-GUIDE.md](DEMO-GUIDE.md) and the latest package `pulse0-onprem-v10_19.tar.gz`.
+# Pulse0: self-hosted observability on OpenTelemetry
 
-# Pulse0 — OpenTelemetry-Native Observability Platform
+Traces, logs and metrics from one OpenTelemetry endpoint, with a web UI for services, the service map, traces, logs, metrics,
+Kubernetes, dashboards, alerts, SLOs, synthetic checks, website monitoring and an AI assistant that works with any model.
+Runs on your own Kubernetes cluster or a single VM; your data stays with you.
+
+## Start here
+
+1. **Download** the latest package: **[`pulse0-onprem-v10_20.tar.gz`](pulse0-onprem-v10_20.tar.gz)**.
+2. **Follow [GETTING-STARTED.md](GETTING-STARTED.md)**: build, install (Kubernetes, a Docker VM or a laptop), first login, getting data in,
+   the AI assistant, Community vs Pro, upgrading and troubleshooting. About 20 minutes.
+3. **Giving a client demo?** See **[DEMO-GUIDE.md](DEMO-GUIDE.md)**.
+
+| Package | Use |
+|---|---|
+| `pulse0-onprem-v10_20.tar.gz` | **Latest: use this one** |
+| `pulse0-onprem-v10_6` ... `v10_19` | Earlier releases, kept for reference |
+
+Every package contains the complete product: the server, web UI, Helm chart, VM install files, demo apps and docs
+(`GETTING-STARTED.md`, `ON-PREM.md`, `DEMO.md`, `UPGRADE.md`). The Pro license module is proprietary and is not in this repository.
+
+---
+
+## Previous development tree (reference only)
+
+> The folders and instructions below belong to an older development tree. **For a new install, use the package above**, not
+> `deploy.sh` or the source in these folders.
+
+### Pulse0 — OpenTelemetry-Native Observability Platform (older tree)
 
 Your own observability platform. Single OTLP endpoint for traces, logs, and metrics. Resource-centric UI. Zero code changes in your apps. Runs on any Kubernetes — **EKS, AKS, bare-metal, k3s, kind** — or just Docker. Covers every pillar of what Dash0 charges for, plus a **Service Health Score** feature they don't have.
 
