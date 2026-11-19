@@ -9,14 +9,15 @@ Runs on your own Kubernetes cluster or a single VM; your data stays with you.
 
 ## Start here
 
-1. **Download** the latest package: **[`nebulens-onprem-v11_1.tar.gz`](nebulens-onprem-v11_1.tar.gz)**.
+1. **Download** the latest package: **[`nebulens-onprem-v11_2.tar.gz`](nebulens-onprem-v11_2.tar.gz)**.
 2. **Follow `GETTING-STARTED.md`** inside the package: build, install (Kubernetes, a Docker VM or a laptop), first login, getting
    data in, the AI assistant, Community vs Pro, upgrading (including from Pulse0) and troubleshooting. About 20 minutes.
 3. **Giving a client demo?** See `DEMO.md` inside the package.
 
 | Package | Use |
 |---|---|
-| `nebulens-onprem-v11_1.tar.gz` | **Latest: use this one** |
+| `nebulens-onprem-v11_2.tar.gz` | **Latest: use this one** (adds eBPF tracing: every app, no code, no restart) |
+| `nebulens-onprem-v11_1.tar.gz` | Previous release |
 | `oscilyx-onprem-v11_0.tar.gz` | Superseded by v11_1 (the same release under the short-lived name Oscilyx) |
 | `pulse0-onprem-v10_6` ... `v10_23` | Earlier releases under the old name, kept for reference |
 | `files (2).zip` (contains a separate `v10_21`) | Superseded; do not install that v10_21 |
