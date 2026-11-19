@@ -1,6 +1,7 @@
-# Oscilyx (formerly Pulse0): self-hosted observability on OpenTelemetry
+# NebuLens (formerly Pulse0): self-hosted observability on OpenTelemetry
 
-> **Pulse0 has been renamed Oscilyx** as of v11.0. Existing Pulse0 installs upgrade in place; see `UPGRADE.md` inside the package.
+> **Pulse0 has been renamed NebuLens** as of v11.1. Existing Pulse0 installs upgrade in place; see `UPGRADE.md` inside the package.
+> Source code: **https://github.com/syedammarsuhail/nebulens**
 
 Traces, logs and metrics from one OpenTelemetry endpoint, with a web UI for services, the service map, traces, logs, metrics,
 Kubernetes, dashboards, alerts, SLOs, synthetic checks, website monitoring and an AI assistant that works with any model.
@@ -8,14 +9,15 @@ Runs on your own Kubernetes cluster or a single VM; your data stays with you.
 
 ## Start here
 
-1. **Download** the latest package: **[`oscilyx-onprem-v11_0.tar.gz`](oscilyx-onprem-v11_0.tar.gz)**.
+1. **Download** the latest package: **[`nebulens-onprem-v11_1.tar.gz`](nebulens-onprem-v11_1.tar.gz)**.
 2. **Follow `GETTING-STARTED.md`** inside the package: build, install (Kubernetes, a Docker VM or a laptop), first login, getting
    data in, the AI assistant, Community vs Pro, upgrading (including from Pulse0) and troubleshooting. About 20 minutes.
 3. **Giving a client demo?** See `DEMO.md` inside the package.
 
 | Package | Use |
 |---|---|
-| `oscilyx-onprem-v11_0.tar.gz` | **Latest: use this one** |
+| `nebulens-onprem-v11_1.tar.gz` | **Latest: use this one** |
+| `oscilyx-onprem-v11_0.tar.gz` | Superseded by v11_1 (the same release under the short-lived name Oscilyx) |
 | `pulse0-onprem-v10_6` ... `v10_23` | Earlier releases under the old name, kept for reference |
 | `files (2).zip` (contains a separate `v10_21`) | Superseded; do not install that v10_21 |
 
