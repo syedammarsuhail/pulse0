@@ -9,14 +9,15 @@ Runs on your own Kubernetes cluster or a single VM; your data stays with you.
 
 ## Start here
 
-1. **Download** the latest package: **[`nebulens-onprem-v11_6.tar.gz`](nebulens-onprem-v11_6.tar.gz)**.
+1. **Download** the latest package: **[`nebulens-onprem-v11_7.tar.gz`](nebulens-onprem-v11_7.tar.gz)**.
 2. **Follow `GETTING-STARTED.md`** inside the package: build, install (Kubernetes, a Docker VM or a laptop), first login, getting
    data in, the AI assistant, Community vs Pro, upgrading (including from Pulse0) and troubleshooting. About 20 minutes.
 3. **Giving a client demo?** See `DEMO.md` inside the package.
 
 | Package | Use |
 |---|---|
-| `nebulens-onprem-v11_6.tar.gz` | **Latest: use this one** (signed off end to end on EKS at 8.5M spans) |
+| `nebulens-onprem-v11_7.tar.gz` | **Latest: use this one** (QA sign-off PASS end to end on EKS at 13M spans) |
+| `nebulens-onprem-v11_6.tar.gz` | Previous release |
 | `nebulens-onprem-v11_5.tar.gz` | Previous release |
 | `nebulens-onprem-v11_4.tar.gz` | Previous release |
 | `nebulens-onprem-v11_3.tar.gz` | Previous release |
